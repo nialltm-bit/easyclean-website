@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job sign-off | EasyClean Somerset</title>
+<meta name="robots" content="noindex, nofollow">
+
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* Internal tool for Niall only, opened on his own phone at the end of a
+     job — not a customer- or visitor-facing page, so this deliberately
+     doesn't carry GA4, OG tags, or SEO copy the way index.html/agents.html/
+     terms.html do. Colour tokens kept identical to the rest of the site so
+     it still looks like it belongs to the same business at a glance. */
+  :root {
+    --ink: #12232B;
+    --ink-soft: #2A3D46;
+    --paper: #F5F7F6;
+    --surface: #FFFFFF;
+    --teal: #0E7C86;
+    --teal-deep: #0A5960;
+    --teal-tint: #E4F0F0;
+    --slate: #5C6F73;
+    --line: #DCE3E2;
+    --stamp: #B5461E;
+    --on-ink: #F5F7F6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #E9EEEC; --ink-soft: #C4D0CD; --paper: #0D1A1F; --surface: #15262C;
+      --teal: #3FB8C4; --teal-deep: #6ED2DB; --teal-tint: #143137; --slate: #8FA3A2;
+      --line: #24383E; --stamp: #E58256; --on-ink: #0D1A1F;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Public Sans", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 20px 16px 48px; }
+  header.top { display: flex; align-items: center; gap: 10px; padding: 6px 0 20px; }
+  header.top img { width: 32px; height: 32px; display: block; }
+  header.top .word { font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 19px; text-transform: uppercase; letter-spacing: 0.01em; }
+  header.top .word span { color: var(--teal); }
+  .eyebrow { font-weight: 700; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--slate); margin: 0 0 4px; }
+  h1 { font-family: "Big Shoulders Display", sans-serif; font-size: 26px; font-weight: 800; margin: 0 0 18px; letter-spacing: -0.01em; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px 18px; margin-bottom: 18px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+  .row:last-child { border-bottom: none; }
+  .row .label { color: var(--slate); font-weight: 600; }
+  .row .value { text-align: right; font-weight: 600; }
+  .msg { font-size: 14.5px; line-height: 1.6; color: var(--slate); margin: 0 0 16px; }
+  .state { display: none; }
+  .state.active { display: block; }
+  .pad-label { font-weight: 700; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--slate); margin-bottom: 8px; }
+  canvas#pad {
+    width: 100%;
+    height: 220px;
+    display: block;
+    background: var(--surface);
+    border: 1px dashed var(--line);
+    border-radius: 6px;
+    touch-action: none;
+  }
+  .pad-actions { display: flex; gap: 10px; margin-top: 10px; }
+  button {
+    font-family: "Public Sans", Arial, sans-serif;
+    font-weight: 700;
+    font-size: 14.5px;
+    border: none;
+    border-radius: 4px;
+    padding: 13px 18px;
+    cursor: pointer;
+  }
+  .btn-primary { background: var(--stamp); color: var(--on-ink); width: 100%; }
+  .btn-primary[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .btn-ghost { background: transparent; color: var(--slate); border: 1px solid var(--line); }
+  .success { border-top: 3px solid var(--teal); }
+  .error { border-top: 3px solid var(--stamp); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <img src="apple-touch-icon.png" alt="">
+    <div class="word">Easy<span>Clean</span> Somerset</div>
+  </header>
+
+  <div class="eyebrow">Job sign-off</div>
+  <h1>Confirm this job&#8217;s done</h1>
+
+  <div id="state-loading" class="state active">
+    <p class="msg">Loading job details&hellip;</p>
+  </div>
+
+  <div id="state-error" class="state">
+    <div class="card error">
+      <p class="msg" id="error-text" style="margin:0;">Couldn&#8217;t find that job. Double-check the link, or open it again from the calendar event.</p>
+    </div>
+  </div>
+
+  <div id="state-already" class="state">
+    <div class="card success">
+      <p class="msg" style="margin:0;">This job&#8217;s already been signed off. No need to do it again.</p>
+    </div>
+  </div>
+
+  <div id="state-active" class="state">
+    <div class="card" id="job-details"></div>
+
+    <div class="card">
+      <div class="pad-label">Customer signature</div>
+      <canvas id="pad"></canvas>
+      <div class="pad-actions">
+        <button type="button" class="btn-ghost" id="btn-clear">Clear</button>
+      </div>
+    </div>
+
+    <button type="button" class="btn-primary" id="btn-submit" disabled>Confirm job complete</button>
+    <p class="msg" id="submit-error" style="margin-top:10px; display:none;"></p>
+  </div>
+
+  <div id="state-success" class="state">
+    <div class="card success">
+      <p class="msg" style="margin:0;">Signed off. The customer&#8217;s been emailed a thank-you and their invoice.</p>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzib7aiWlTG1JN1vawUToNL2r9OYoFp-fJYNsbvJdhHAHtLaddPr0wMKYnxYLwoQxt_GA/exec";
+  var params = new URLSearchParams(window.location.search);
+  var ref = params.get("ref");
+
+  function showState(id) {
+    document.querySelectorAll(".state").forEach(function (el) { el.classList.remove("active"); });
+    document.getElementById(id).classList.add("active");
+  }
+
+  function detailRow(label, value) {
+    return '<div class="row"><span class="label">' + label + '</span><span class="value">' + value + '</span></div>';
+  }
+
+  if (!ref) {
+    showState("state-error");
+  } else {
+    fetch(APPS_SCRIPT_URL + "?action=job&ref=" + encodeURIComponent(ref))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data.ok) {
+          document.getElementById("error-text").textContent =
+            data.error === "not_found"
+              ? "Couldn't find a job with reference " + ref + ". Double-check the link."
+              : "Something went wrong loading this job. Try again in a moment.";
+          showState("state-error");
+          return;
+        }
+        if (data.alreadyCompleted) {
+          showState("state-already");
+          return;
+        }
+        document.getElementById("job-details").innerHTML =
+          detailRow("Customer", data.name) +
+          detailRow("Address", data.address) +
+          detailRow("What", data.items) +
+          detailRow("Total", data.total + " &middot; " + data.payment) +
+          detailRow("Reference", data.reference);
+        showState("state-active");
+        initPad();
+      })
+      .catch(function () {
+        document.getElementById("error-text").textContent = "Couldn't reach the booking system. Check your connection and try again.";
+        showState("state-error");
+      });
+  }
+
+  // ---- Signature pad ----
+  // Pointer events cover mouse, touch and pen with one set of handlers,
+  // which is all modern mobile browsers a phone on-site would be using.
+  // touch-action:none on the canvas (in the CSS above) stops the page from
+  // scrolling underneath a finger while signing.
+  function initPad() {
+    var canvas = document.getElementById("pad");
+    var ctx = canvas.getContext("2d");
+    var drawing = false;
+    var touched = false;
+    var submitBtn = document.getElementById("btn-submit");
+
+    function resizeCanvas() {
+      var ratio = window.devicePixelRatio || 1;
+      var rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * ratio;
+      canvas.height = rect.height * ratio;
+      ctx.scale(ratio, ratio);
+      ctx.lineWidth = 2.2;
+      ctx.lineCap = "round";
+      ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#12232B";
+    }
+    resizeCanvas();
+
+    function pos(e) {
+      var rect = canvas.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+
+    canvas.addEventListener("pointerdown", function (e) {
+      drawing = true;
+      touched = true;
+      var p = pos(e);
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      submitBtn.disabled = false;
+    });
+    canvas.addEventListener("pointermove", function (e) {
+      if (!drawing) return;
+      var p = pos(e);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(function (evt) {
+      canvas.addEventListener(evt, function () { drawing = false; });
+    });
+
+    document.getElementById("btn-clear").addEventListener("click", function () {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      touched = false;
+      submitBtn.disabled = true;
+    });
+
+    submitBtn.addEventListener("click", function () {
+      if (!touched) return;
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Sending…";
+      var dataUrl = canvas.toDataURL("image/png");
+      fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight Apps Script can't answer
+        body: JSON.stringify({ action: "complete", reference: ref, signature: dataUrl })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.ok) throw new Error(data.error || "unknown");
+          showState("state-success");
+        })
+        .catch(function () {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Confirm job complete";
+          var err = document.getElementById("submit-error");
+          err.textContent = "Couldn't save that just now. Check your connection and try again.";
+          err.style.display = "block";
+        });
+    });
+  }
+</script>
+</body>
+</html>
