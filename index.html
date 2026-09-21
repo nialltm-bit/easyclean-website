@@ -46,13 +46,37 @@
   "description": "Fixed-price carpet, upholstery and mattress cleaning across Somerset & BANES. Instant online booking, no home visit needed.",
   "url": "https://easycleansomerset.co.uk/",
   "telephone": "+447873212249",
+  "email": "easycleansomerset@gmail.com",
   "image": "https://easycleansomerset.co.uk/og-image.png",
   "priceRange": "££",
   "areaServed": [
     "Somerset", "Bath and North East Somerset",
     "Midsomer Norton", "Radstock", "Frome", "Bath",
     "Paulton", "Timsbury", "Peasedown St John"
-  ]
+  ],
+  "sameAs": [
+    "https://uk.trustpilot.com/review/easycleansomerset.co.uk"
+  ],
+  "hasOfferCatalog": {
+    "@type": "OfferCatalog",
+    "name": "Carpet, upholstery, mattress and rug cleaning",
+    "itemListElement": [
+      { "@type": "Offer", "price": "35", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Small room carpet cleaning" } },
+      { "@type": "Offer", "price": "45", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Medium room carpet cleaning" } },
+      { "@type": "Offer", "price": "75", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Large room carpet cleaning" } },
+      { "@type": "Offer", "price": "25", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Armchair upholstery cleaning" } },
+      { "@type": "Offer", "price": "40", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Loveseat / 2-seater sofa cleaning" } },
+      { "@type": "Offer", "price": "55", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "3-seater sofa cleaning" } },
+      { "@type": "Offer", "price": "75", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "4-seater / corner sofa cleaning" } },
+      { "@type": "Offer", "price": "15", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Footstool / pouffe cleaning" } },
+      { "@type": "Offer", "price": "40", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Mattress cleaning (single/double)" } },
+      { "@type": "Offer", "price": "55", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Mattress cleaning (king/super king)" } },
+      { "@type": "Offer", "price": "25", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Small rug cleaning" } },
+      { "@type": "Offer", "price": "40", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Medium rug cleaning" } },
+      { "@type": "Offer", "price": "60", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Large rug cleaning" } },
+      { "@type": "Offer", "price": "55", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Car interior cleaning (all seats)" } }
+    ]
+  }
 }
 </script>
 <style>
@@ -789,6 +813,42 @@
   .hours-cell .d { font-family: "Public Sans", sans-serif; font-weight: 600; font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--slate); }
   .hours-cell .t { font-weight: 700; margin-top: 4px; font-size: 15px; }
 
+  /* ============ FAQ ============ */
+  .faq-list { margin-top: 28px; max-width: 760px; }
+  .faq-item {
+    border-bottom: 1px solid var(--line);
+    padding: 18px 0;
+  }
+  .faq-item summary {
+    font-family: "Public Sans", sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+  }
+  .faq-item summary::-webkit-details-marker { display: none; }
+  .faq-item summary::after {
+    content: "+";
+    font-family: "Big Shoulders Display", sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--teal);
+    flex-shrink: 0;
+  }
+  .faq-item[open] summary::after { content: "\2212"; }
+  .faq-item p {
+    margin: 12px 0 0;
+    color: var(--ink-soft);
+    font-size: 15px;
+    line-height: 1.6;
+    max-width: 62ch;
+  }
+  .faq-item p a { color: var(--teal-deep); }
+
   /* ============ FOOTER ============ */
   footer.site {
     background: var(--ink);
@@ -835,6 +895,7 @@
       <a href="#how" class="hide-narrow">How it works</a>
       <a href="#prices" class="hide-narrow">Prices</a>
       <a href="#guarantee" class="hide-narrow">Guarantee</a>
+      <a href="faq.html" class="hide-narrow">FAQ</a>
       <a href="#book" class="btn btn-ghost book-link">Book online</a>
       <a id="nav-wa" href="#" target="_blank" rel="noopener" class="btn btn-wa">WhatsApp us</a>
     </nav>
@@ -1224,6 +1285,16 @@
     </div>
   </section>
 
+  <!-- ============ FAQ (teaser — full list lives on faq.html) ============ -->
+  <section id="faq">
+    <div class="wrap">
+      <div class="eyebrow">Questions</div>
+      <h2 style="text-transform:none; font-size:clamp(28px,3.6vw,40px); font-weight:700;">Frequently asked questions.</h2>
+      <p class="prose" style="color:var(--ink-soft); font-size:15px; max-width:56ch; margin-top:10px;">Pricing, booking, payment, cancellations and our guarantee, answered, for homeowners and renters as well as landlords and letting agents.</p>
+      <a href="faq.html" class="btn btn-ghost" style="margin-top:16px; display:inline-block; width:auto;">See all FAQs</a>
+    </div>
+  </section>
+
   <!-- ============ REVIEWS ============ -->
   <section>
     <div class="wrap">
@@ -1252,6 +1323,7 @@
         <p><a href="#prices">Select your items</a></p>
         <p><a href="#book" class="book-link">Book online</a></p>
         <p><a id="foot-wa" href="#" target="_blank" rel="noopener">WhatsApp Quick Quote</a></p>
+        <p><a href="faq.html">FAQs</a></p>
       </div>
       <div>
         <h5>Contact</h5>
