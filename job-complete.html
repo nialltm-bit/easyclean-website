@@ -88,6 +88,24 @@
   .btn-ghost { background: transparent; color: var(--slate); border: 1px solid var(--line); }
   .success { border-top: 3px solid var(--teal); }
   .error { border-top: 3px solid var(--stamp); }
+  .sign-statement { font-size: 13px; line-height: 1.5; color: var(--slate); margin: 0 0 12px; }
+  .alt-path { margin-top: 14px; text-align: center; }
+  .btn-link {
+    background: none; border: none; padding: 4px; width: auto;
+    font-size: 13px; font-weight: 600; color: var(--slate); text-decoration: underline;
+    cursor: pointer;
+  }
+  .no-sig-panel { display: none; margin-top: 12px; text-align: left; }
+  .no-sig-panel input {
+    width: 100%; font-family: "Public Sans", Arial, sans-serif; font-size: 14.5px;
+    padding: 11px 12px; border: 1px solid var(--line); border-radius: 4px;
+    background: var(--surface); color: var(--ink); margin-bottom: 10px;
+  }
+  a.btn-ghost {
+    display: block; box-sizing: border-box; text-align: center; text-decoration: none;
+    font-family: "Public Sans", Arial, sans-serif; font-weight: 700; font-size: 14.5px;
+    border-radius: 4px; padding: 13px 18px;
+  }
 </style>
 </head>
 <body>
@@ -122,6 +140,7 @@
 
     <div class="card">
       <div class="pad-label">Customer signature</div>
+      <p class="sign-statement">By signing below and confirming, the customer confirms the work above has been completed to their satisfaction.</p>
       <canvas id="pad"></canvas>
       <div class="pad-actions">
         <button type="button" class="btn-ghost" id="btn-clear">Clear</button>
@@ -130,11 +149,30 @@
 
     <button type="button" class="btn-primary" id="btn-submit" disabled>Confirm job complete</button>
     <p class="msg" id="submit-error" style="margin-top:10px; display:none;"></p>
+
+    <div class="alt-path">
+      <button type="button" class="btn-link" id="btn-away-toggle">Customer not there right now?</button>
+      <div class="no-sig-panel" id="away-panel">
+        <p class="pad-label" id="send-link-intro" style="margin-bottom:10px;">Send them the link so they can sign remotely</p>
+        <button type="button" class="btn-ghost" id="btn-send-email" style="width:100%; margin-bottom:10px;">Email them the link</button>
+        <a href="#" class="btn-ghost" id="btn-send-whatsapp" style="width:100%; margin-bottom:10px;" target="_blank" rel="noopener">WhatsApp them the link</a>
+        <p class="msg" id="send-link-status" style="display:none; margin:0 0 14px;"></p>
+
+        <div style="padding-top:14px; border-top:1px solid var(--line);">
+          <button type="button" class="btn-link" id="btn-no-sig-toggle">Or mark it complete without a signature</button>
+          <div class="no-sig-panel" id="no-sig-panel">
+            <label class="pad-label" for="no-sig-reason">Reason (optional)</label>
+            <input type="text" id="no-sig-reason" placeholder="e.g. no one home, key left out">
+            <button type="button" class="btn-ghost" id="btn-no-sig-confirm" style="width:100%;">Complete without signature</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div id="state-success" class="state">
     <div class="card success">
-      <p class="msg" style="margin:0;">Signed off. The customer&#8217;s been emailed a thank-you and their invoice.</p>
+      <p class="msg" id="success-text" style="margin:0;">Signed off. The customer&#8217;s been emailed a thank-you and their invoice.</p>
     </div>
   </div>
 
@@ -179,7 +217,7 @@
           detailRow("Total", data.total + " &middot; " + data.payment) +
           detailRow("Reference", data.reference);
         showState("state-active");
-        initPad();
+        initPad(data);
       })
       .catch(function () {
         document.getElementById("error-text").textContent = "Couldn't reach the booking system. Check your connection and try again.";
@@ -192,7 +230,7 @@
   // which is all modern mobile browsers a phone on-site would be using.
   // touch-action:none on the canvas (in the CSS above) stops the page from
   // scrolling underneath a finger while signing.
-  function initPad() {
+  function initPad(jobData) {
     var canvas = document.getElementById("pad");
     var ctx = canvas.getContext("2d");
     var drawing = false;
@@ -240,6 +278,11 @@
       submitBtn.disabled = true;
     });
 
+    function showSubmitError(el) {
+      el.textContent = "Couldn't save that just now. Check your connection and try again.";
+      el.style.display = "block";
+    }
+
     submitBtn.addEventListener("click", function () {
       if (!touched) return;
       submitBtn.disabled = true;
@@ -253,14 +296,114 @@
         .then(function (r) { return r.json(); })
         .then(function (data) {
           if (!data.ok) throw new Error(data.error || "unknown");
+          document.getElementById("success-text").textContent =
+            "Signed off. The customer's been emailed a thank-you and their invoice.";
           showState("state-success");
         })
         .catch(function () {
           submitBtn.disabled = false;
           submitBtn.textContent = "Confirm job complete";
-          var err = document.getElementById("submit-error");
-          err.textContent = "Couldn't save that just now. Check your connection and try again.";
-          err.style.display = "block";
+          showSubmitError(document.getElementById("submit-error"));
+        });
+    });
+
+    // ---- "Customer not available to sign" fallback ----
+    // For the empty-property / key-left-out / declined-to-sign cases —
+    // completes the job the same way (invoice + thank-you email still go
+    // out), but records why there's no signature instead of leaving that
+    // column looking like a silent failure.
+    var noSigToggle = document.getElementById("btn-no-sig-toggle");
+    var noSigPanel = document.getElementById("no-sig-panel");
+    var noSigConfirm = document.getElementById("btn-no-sig-confirm");
+
+    noSigToggle.addEventListener("click", function () {
+      noSigPanel.style.display = "block";
+      noSigToggle.style.display = "none";
+    });
+
+    noSigConfirm.addEventListener("click", function () {
+      noSigConfirm.disabled = true;
+      noSigConfirm.textContent = "Sending…";
+      var reason = document.getElementById("no-sig-reason").value.trim();
+      fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "complete", reference: ref, noSignature: true, reason: reason })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data.ok) throw new Error(data.error || "unknown");
+          document.getElementById("success-text").textContent =
+            "Marked complete. The customer's been emailed a thank-you and their invoice.";
+          showState("state-success");
+        })
+        .catch(function () {
+          noSigConfirm.disabled = false;
+          noSigConfirm.textContent = "Complete without signature";
+          showSubmitError(document.getElementById("submit-error"));
+        });
+    });
+
+    // ---- "Send them the link" (customer not there right now) ----
+    // Sits alongside — not instead of — the no-signature fallback above.
+    // Lets the customer sign remotely themselves: an automatic email, and/or
+    // a tap-to-send WhatsApp link (there's no paid WhatsApp Business API, so
+    // this just opens a pre-filled chat for Niall to hit send on).
+    var awayToggle = document.getElementById("btn-away-toggle");
+    var awayPanel = document.getElementById("away-panel");
+    var sendLinkIntro = document.getElementById("send-link-intro");
+    var sendEmailBtn = document.getElementById("btn-send-email");
+    var sendWhatsappBtn = document.getElementById("btn-send-whatsapp");
+    var sendLinkStatus = document.getElementById("send-link-status");
+
+    awayToggle.addEventListener("click", function () {
+      awayPanel.style.display = "block";
+      awayToggle.style.display = "none";
+    });
+
+    var canEmailLink = !!jobData.hasEmail;
+    var canWhatsappLink = !!jobData.whatsappNumber;
+
+    if (!canEmailLink) {
+      sendEmailBtn.style.display = "none";
+    }
+    if (canWhatsappLink) {
+      var waMessage = "Hi " + jobData.name + ", could you confirm today's clean is done? " + window.location.href;
+      sendWhatsappBtn.href = "https://wa.me/" + jobData.whatsappNumber + "?text=" + encodeURIComponent(waMessage);
+    } else {
+      sendWhatsappBtn.style.display = "none";
+    }
+    if (!canEmailLink && !canWhatsappLink) {
+      sendLinkIntro.style.display = "none";
+    }
+
+    function showSendLinkStatus(text) {
+      sendLinkStatus.textContent = text;
+      sendLinkStatus.style.display = "block";
+    }
+
+    sendEmailBtn.addEventListener("click", function () {
+      sendEmailBtn.disabled = true;
+      sendEmailBtn.textContent = "Sending…";
+      fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ action: "send-signing-link", reference: ref })
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          sendEmailBtn.disabled = false;
+          sendEmailBtn.textContent = "Email them the link";
+          if (!data.ok) {
+            showSendLinkStatus("Couldn't send that — try again in a moment.");
+            return;
+          }
+          showSendLinkStatus("Link emailed to the customer.");
+        })
+        .catch(function () {
+          sendEmailBtn.disabled = false;
+          sendEmailBtn.textContent = "Email them the link";
+          showSendLinkStatus("Couldn't send that — check your connection and try again.");
         });
     });
   }
