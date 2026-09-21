@@ -182,6 +182,11 @@
   var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzib7aiWlTG1JN1vawUToNL2r9OYoFp-fJYNsbvJdhHAHtLaddPr0wMKYnxYLwoQxt_GA/exec";
   var params = new URLSearchParams(window.location.search);
   var ref = params.get("ref");
+  // mode=remote marks a link that was emailed/WhatsApped to the customer to
+  // sign themselves — they should only see the signature pad, never the
+  // "customer not there / send the link again / complete without a
+  // signature" panel, which is Niall's own on-site tool.
+  var isRemote = params.get("mode") === "remote";
 
   function showState(id) {
     document.querySelectorAll(".state").forEach(function (el) { el.classList.remove("active"); });
@@ -216,6 +221,9 @@
           detailRow("What", data.items) +
           detailRow("Total", data.total + " &middot; " + data.payment) +
           detailRow("Reference", data.reference);
+        if (isRemote) {
+          document.querySelector(".alt-path").style.display = "none";
+        }
         showState("state-active");
         initPad(data);
       })
@@ -368,7 +376,12 @@
       sendEmailBtn.style.display = "none";
     }
     if (canWhatsappLink) {
-      var waMessage = "Hi " + jobData.name + ", could you confirm today's clean is done? " + window.location.href;
+      // Build the customer-facing link explicitly, don't reuse
+      // window.location.href — this is Niall's own URL and must not carry
+      // mode=remote, but the link we hand the customer must.
+      var remoteLink = window.location.origin + window.location.pathname +
+        "?ref=" + encodeURIComponent(ref) + "&mode=remote";
+      var waMessage = "Hi " + jobData.name + ", could you confirm today's clean is done? " + remoteLink;
       sendWhatsappBtn.href = "https://wa.me/" + jobData.whatsappNumber + "?text=" + encodeURIComponent(waMessage);
     } else {
       sendWhatsappBtn.style.display = "none";
