@@ -1603,6 +1603,20 @@
       window.history.pushState({}, "", "#booked");
     }
 
+    // Fire an explicit GA4 event for the completed booking itself, on top
+    // of the #booked pageview above. This is what actually lets a booking
+    // be marked as a GA4 "key event" (conversion) and then traced back to
+    // whatever brought that visitor here in the first place (a QR-coded
+    // flyer or business card, direct outreach, organic search), rather
+    // than only knowing a booking happened at all.
+    if (typeof gtag === "function") {
+      gtag("event", "booking_complete", {
+        value: currentSelection.total,
+        currency: "GBP",
+        channel: "Agent/Landlord"
+      });
+    }
+
     document.getElementById("booking-summary").style.display = "none";
     document.getElementById("booking-form").style.display = "none";
     document.getElementById("booking-need-items").style.display = "none";
