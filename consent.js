@@ -92,8 +92,8 @@
     banner.setAttribute("aria-label", "Cookie choices");
     banner.innerHTML =
       '<div class="ec-consent-inner">' +
-        '<p class="ec-consent-text">Can we use cookies for Google Analytics, so we can see how people use the site, and for Trustpilot&#8217;s review widget? Nothing is set unless you say yes. ' +
-          '<a href="privacy.html#cookies">Cookie and privacy info</a></p>' +
+        '<p class="ec-consent-text">We&#8217;d like to use cookies to see how the site is used and to show our Trustpilot reviews. They&#8217;re only set if you accept. ' +
+          '<a href="privacy.html#cookies">Cookie info</a></p>' +
         '<div class="ec-consent-actions">' +
           '<button type="button" class="ec-consent-btn" data-choice="denied">Reject</button>' +
           '<button type="button" class="ec-consent-btn" data-choice="granted">Accept</button>' +
@@ -159,4 +159,3 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
   else start();
 })();
-
