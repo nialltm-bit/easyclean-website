@@ -1081,6 +1081,10 @@
         </div>
 
         <form id="booking-form" style="display:none;">
+          <!-- Spam trap: hidden from people, often filled in by bots. Any booking with it filled is ignored. -->
+          <div aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;">
+            <label for="bf-hp">Leave this empty</label><input type="text" id="bf-hp" name="bf-hp" tabindex="-1" autocomplete="off">
+          </div>
           <div class="bf-grid">
             <div class="bf-row"><label for="bf-name">Your name</label><input type="text" id="bf-name" autocomplete="name" required></div>
             <div class="bf-row bf-row-wide"><label for="bf-business">Business / agency name</label><input type="text" id="bf-business" autocomplete="organization" required></div>
@@ -1707,6 +1711,10 @@
       agencyId: document.getElementById("bf-agency-id").value.trim(),
       channel: "Agent/Landlord",
       items: currentSelection.lines.join(", "),
+      // Structured copy of the basket: the backend re-prices from its own
+      // reading of the live price list, so the price here can't be tampered with.
+      lineItems: Object.keys(state).filter(function (k) { return state[k] > 0; }).map(function (k) { return { item: k, qty: state[k] }; }),
+      website: document.getElementById("bf-hp").value, // spam trap (see the hidden field in the form)
       total: formatGBP(currentSelection.total),
       estTime: "~" + formatMins(currentSelection.totalMins)
     };
