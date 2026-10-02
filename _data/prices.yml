@@ -1,0 +1,155 @@
+# EasyClean Somerset: the price list.
+#
+# This is the ONE place prices live. When GitHub builds the site it writes
+# the price rows on the homepage (index.html) and the landlord and agent page
+# (agents.html), and the price list Google sees, from this file. The booking
+# system reads its prices from those pages, so it follows automatically.
+#
+# To change a price: edit the number after price: and commit.
+# The site updates in about a minute. Nothing else to change.
+#
+# Each item:
+#   item:        the name used in the basket, booking emails and invoices.
+#                Change with care: past bookings keep the old name.
+#   shown_as:    (optional) a shorter name shown in the price row.
+#   price:       in pounds, whole number, no £ sign.
+#   mins:        roughly how long it takes, in minutes.
+#   meta:        the small grey line under the name. Leave as "" for none.
+#   agents:      true to show it on the landlord and agent page too.
+#   google_name: how it's listed in Google's price data.
+#   group:       which section it sits in (rooms, sofas, mattresses, rugs,
+#                vehicle). Leave these as they are.
+
+
+# ---- Rooms ----
+
+- item: "Small room"
+  price: 35
+  mins: 25
+  meta: "Bedroom, hallway"
+  agents: true
+  google_name: "Small room carpet cleaning"
+  group: rooms
+
+- item: "Medium room"
+  price: 45
+  mins: 35
+  meta: "Double bedroom, dining room"
+  agents: true
+  google_name: "Medium room carpet cleaning"
+  group: rooms
+
+- item: "Large room"
+  price: 75
+  mins: 55
+  meta: "Lounge, open-plan"
+  agents: true
+  google_name: "Large room carpet cleaning"
+  group: rooms
+
+- item: "Stairs and landing (one flight)"
+  price: 50
+  mins: 35
+  meta: "Every step plus the landing carpet"
+  agents: true
+  google_name: "Stairs and landing (one flight) carpet cleaning"
+  group: rooms
+
+# ---- Sofas & seating ----
+
+- item: "Armchair"
+  price: 25
+  mins: 20
+  meta: ""
+  agents: true
+  google_name: "Armchair upholstery cleaning"
+  group: sofas
+
+- item: "Loveseat / 2-seater"
+  shown_as: "Loveseat / 2-seater sofa"
+  price: 40
+  mins: 30
+  meta: ""
+  agents: true
+  google_name: "Loveseat / 2-seater sofa cleaning"
+  group: sofas
+
+- item: "3-seater sofa"
+  price: 55
+  mins: 40
+  meta: ""
+  agents: true
+  google_name: "3-seater sofa cleaning"
+  group: sofas
+
+- item: "4-seater / corner sofa"
+  price: 75
+  mins: 55
+  meta: ""
+  agents: true
+  google_name: "4-seater / corner sofa cleaning"
+  group: sofas
+
+- item: "Footstool / pouffe"
+  price: 15
+  mins: 10
+  meta: ""
+  agents: true
+  google_name: "Footstool / pouffe cleaning"
+  group: sofas
+
+# ---- Mattresses ----
+
+- item: "Mattress (single/double)"
+  shown_as: "Single / double"
+  price: 40
+  mins: 30
+  meta: ""
+  agents: true
+  google_name: "Mattress cleaning (single/double)"
+  group: mattresses
+
+- item: "Mattress (king/super king)"
+  shown_as: "King / super king"
+  price: 55
+  mins: 40
+  meta: ""
+  agents: true
+  google_name: "Mattress cleaning (king/super king)"
+  group: mattresses
+
+# ---- Rugs ----
+
+- item: "Small rug"
+  price: 25
+  mins: 20
+  meta: "Up to approx. 4ft × 6ft"
+  agents: true
+  google_name: "Small rug cleaning"
+  group: rugs
+
+- item: "Medium rug"
+  price: 40
+  mins: 30
+  meta: "Approx. 5ft × 8ft"
+  agents: true
+  google_name: "Medium rug cleaning"
+  group: rugs
+
+- item: "Large rug"
+  price: 60
+  mins: 45
+  meta: "6ft × 9ft and above"
+  agents: true
+  google_name: "Large rug cleaning"
+  group: rugs
+
+# ---- Vehicle interior ----
+
+- item: "Car interior (all seats)"
+  price: 55
+  mins: 40
+  meta: "2 front seats and the full back seat"
+  agents: false
+  google_name: "Car interior cleaning (all seats)"
+  group: vehicle
