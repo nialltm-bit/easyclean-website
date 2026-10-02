@@ -187,6 +187,16 @@
     margin-bottom: 14px;
   }
 
+  /* ============ AUDIENCE SWITCH ============ */
+  /* Slim strip above the sticky header pointing to the other booking page
+     (homeowners/tenants on index.html, landlords/agents on agents.html).
+     Not sticky itself, so it scrolls away and never eats header space. */
+  .audience-bar { background: var(--surface); border-bottom: 1px solid var(--line); }
+  .audience-bar-inner { max-width: 1120px; margin: 0 auto; padding: 7px 24px; text-align: right; font-size: 13.5px; color: var(--ink-soft); }
+  .audience-bar a { color: var(--teal-deep); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; margin-left: 4px; }
+  .audience-bar a:hover { color: var(--ink); }
+  @media (max-width: 460px) { .audience-bar-inner { padding: 5px 16px; font-size: 13px; text-align: center; } }
+
   /* ============ NAV ============ */
   header.site {
     position: sticky;
@@ -293,7 +303,9 @@
 
   /* ============ HERO ============ */
   .hero { padding: 72px 0 64px; }
-  @media (max-width: 480px) { .hero { padding: 36px 0 40px; } }
+  /* Top padding trimmed from 36px when the audience strip was added above the
+     header, so the hero CTA stays above the fold on a 375x667 phone. */
+  @media (max-width: 480px) { .hero { padding: 18px 0 40px; } }
   .hero h1 { font-size: clamp(40px, 6.4vw, 78px); }
   .hero h1 em {
     font-style: normal;
@@ -888,6 +900,10 @@
 </style>
 </head>
 <body>
+
+<div class="audience-bar">
+  <div class="audience-bar-inner">Landlord or letting agent?<a href="agents.html">Book here</a></div>
+</div>
 
 <header class="site">
   <div class="navrow">

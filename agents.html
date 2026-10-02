@@ -170,6 +170,16 @@
     margin-bottom: 14px;
   }
 
+  /* ============ AUDIENCE SWITCH ============ */
+  /* Slim strip above the sticky header pointing to the other booking page
+     (homeowners/tenants on index.html, landlords/agents on agents.html).
+     Not sticky itself, so it scrolls away and never eats header space. */
+  .audience-bar { background: var(--surface); border-bottom: 1px solid var(--line); }
+  .audience-bar-inner { max-width: 1120px; margin: 0 auto; padding: 7px 24px; text-align: right; font-size: 13.5px; color: var(--ink-soft); }
+  .audience-bar a { color: var(--teal-deep); font-weight: 700; text-decoration: underline; text-underline-offset: 2px; margin-left: 4px; }
+  .audience-bar a:hover { color: var(--ink); }
+  @media (max-width: 460px) { .audience-bar-inner { padding: 5px 16px; font-size: 13px; text-align: center; } }
+
   /* ============ NAV ============ */
   header.site {
     position: sticky;
@@ -240,7 +250,9 @@
 
   /* ============ HERO ============ */
   .hero { padding: 72px 0 64px; }
-  @media (max-width: 480px) { .hero { padding: 36px 0 40px; } }
+  /* Top padding trimmed from 36px when the audience strip was added above the
+     header, so the hero CTA stays above the fold on a 375x667 phone. */
+  @media (max-width: 480px) { .hero { padding: 18px 0 40px; } }
   .hero h1 { font-size: clamp(40px, 6.4vw, 78px); }
   .hero h1 em {
     font-style: normal;
@@ -597,8 +609,7 @@
     .bf-row-wide { grid-column: auto; }
   }
   .bf-row input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
-  .bf-radio { display: flex; gap: 18px; margin-top: 2px; }
-  .bf-radio label { display: flex; align-items: center; gap: 6px; font-size: 14.5px; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); }
+  .bf-pay-note { margin: 2px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--ink); }
   .bf-row label.bf-checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink-soft); cursor: pointer; }
   .bf-checkbox-row input[type="checkbox"] { width: 16px; height: 16px; flex: none; accent-color: var(--teal); }
   .bf-days-nav {
@@ -770,6 +781,10 @@
 </style>
 </head>
 <body>
+
+<div class="audience-bar">
+  <div class="audience-bar-inner">Homeowner or tenant?<a href="index.html">Book here</a></div>
+</div>
 
 <header class="site">
   <div class="navrow">
@@ -1080,11 +1095,8 @@
             </div>
           </div>
           <div class="bf-row">
-            <label>How would you like to pay?</label>
-            <div class="bf-radio">
-              <label><input type="radio" name="bf-payment" value="Cash" checked> Cash</label>
-              <label><input type="radio" name="bf-payment" value="Bank transfer"> Bank transfer</label>
-            </div>
+            <label>Payment</label>
+            <p class="bf-pay-note">We&#8217;ll email an invoice once the job&#8217;s done, payable by bank transfer within 14 days.</p>
           </div>
           <div class="bf-row">
             <label>Choose a time</label>
@@ -1661,7 +1673,10 @@
       address: document.getElementById("bf-address").value.trim() + ", " + document.getElementById("bf-postcode").value.trim(),
       siteContactName: document.getElementById("bf-site-contact-name").value.trim(),
       siteContactPhone: document.getElementById("bf-site-contact-phone").value.trim(),
-      payment: document.querySelector('input[name="bf-payment"]:checked').value,
+      // Agent/landlord bookings are always invoiced (14 days, bank transfer),
+      // no cash option. Code.gs treats any agent payment value other than
+      // "Cash" as a payment-due invoice.
+      payment: "Invoice, 14 days",
       marketingOptIn: document.getElementById("bf-marketing").checked,
       agencyId: document.getElementById("bf-agency-id").value.trim(),
       channel: "Agent/Landlord",
