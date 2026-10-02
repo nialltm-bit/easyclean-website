@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>EasyClean Admin</title>
+<!-- Home-screen launcher for the private admin app. The admin app itself is
+     hosted by Google (Apps Script), which doesn't let us set the iPhone
+     home-screen icon, so this page on our own site carries the logo and
+     forwards to it. Safe to be public: the admin app behind it only opens
+     for the business Google account. Not linked from anywhere on the site. -->
+<meta name="apple-mobile-web-app-title" content="EC Admin">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<style>
+  :root { --ink: #12232B; --paper: #F5F7F6; --surface: #FFFFFF; --teal: #0E7C86; --slate: #5C6F73; --line: #DCE3E2; --stamp: #B5461E; --on-ink: #F5F7F6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --ink: #E9EEEC; --paper: #0D1A1F; --surface: #15262C; --teal: #3FB8C4; --slate: #8FA3A2; --line: #24383E; --stamp: #E58256; --on-ink: #0D1A1F; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: "Public Sans", Arial, sans-serif; }
+  .wrap { max-width: 420px; margin: 0 auto; padding: 48px 20px; text-align: center; }
+  img { width: 72px; height: 72px; border-radius: 16px; }
+  h1 { font-size: 22px; margin: 16px 0 6px; }
+  p { font-size: 15px; line-height: 1.55; color: var(--slate); margin: 0 0 18px; }
+  .btn { display: block; background: var(--stamp); color: var(--on-ink); text-decoration: none; font-weight: 700; font-size: 16px; padding: 14px; border-radius: 6px; }
+  .setup { margin-top: 28px; padding: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; text-align: left; }
+  .setup p { font-size: 14px; margin: 0 0 10px; }
+  label { display: flex; gap: 10px; align-items: center; font-size: 14px; font-weight: 600; }
+  label input { width: 20px; height: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img src="apple-touch-icon.png" alt="">
+  <h1>EasyClean Admin</h1>
+  <p>Jobs, sign-offs and unpaid invoices.</p>
+  <a class="btn" id="open" href="#">Open admin</a>
+
+  <div class="setup" id="setup">
+    <p><strong>Add to your home screen:</strong> tap Share in the address bar, then Add to Home Screen.</p>
+    <p>Then tick this, so tapping the icon goes straight into the admin app from now on:</p>
+    <label><input type="checkbox" id="auto"> Open the admin app automatically</label>
+  </div>
+</div>
+<script>
+  // The admin app's /exec URL (the "Only myself" deployment).
+  var ADMIN_URL = "PASTE_ADMIN_URL_HERE";
+
+  var KEY = "ecAdminAutoOpen";
+  var auto = false;
+  try { auto = localStorage.getItem(KEY) === "1"; } catch (e) {}
+  var setupMode = /[?&]setup=1/.test(location.search); // escape hatch to untick it
+
+  document.getElementById("open").href = ADMIN_URL;
+  document.getElementById("auto").checked = auto;
+  document.getElementById("auto").addEventListener("change", function () {
+    try { localStorage.setItem(KEY, this.checked ? "1" : "0"); } catch (e) {}
+  });
+
+  if (auto && !setupMode && ADMIN_URL.indexOf("https://") === 0) {
+    location.replace(ADMIN_URL);
+  }
+</script>
+</body>
+</html>
