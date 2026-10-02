@@ -1,14 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-14GB1T63G8"></script>
+<!-- Analytics and Trustpilot only load after cookie consent: see consent.js.
+     gtag() calls before then just queue and are never sent without consent. -->
 <script>
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-  gtag('config', 'G-14GB1T63G8');
 </script>
+<script src="consent.js" defer></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Terms &amp; Conditions | EasyClean Somerset</title>
@@ -141,7 +140,7 @@
   }
 
   /* ============ CONTENT ============ */
-  .tc-hero { padding: 56px 0 8px; }
+  .tc-hero { padding: 56px 24px 8px; }
   .tc-hero .eyebrow {
     font-family: "Public Sans", sans-serif;
     font-weight: 700;
@@ -153,7 +152,7 @@
   }
   .tc-hero h1 { font-size: clamp(30px, 5vw, 44px); }
   .tc-updated { color: var(--slate); font-size: 13.5px; margin-top: 14px; }
-  .tc-body { padding: 24px 0 80px; }
+  .tc-body { padding: 24px 24px 80px; }
   .tc-body h2 {
     font-family: "Public Sans", sans-serif;
     font-weight: 700;
@@ -285,7 +284,7 @@
     <p>If you booked online or by phone, you have a legal right to cancel within 14 days of booking without giving a reason. Because our services are usually carried out sooner than that (to meet moving dates and similar), by confirming a booking for a date within the 14-day period you&rsquo;re asking us to begin the service before that period ends. If you then cancel after the work has been completed, you lose the right to cancel under these regulations for that booking; if you cancel after we&rsquo;ve started but before we&rsquo;ve finished, you may need to pay for the proportion of the service already provided.</p>
 
     <h2>12. Your data</h2>
-    <p>We collect the name, phone number, email, and address you provide at booking to arrange and carry out the cleaning, and to send you a confirmation and any messages about that booking. If you tick the marketing opt-in box at booking, we may also contact you about future offers or reminders &mdash; you can opt out at any time by telling us via WhatsApp or email. We don&rsquo;t sell or share your details with third parties beyond what&rsquo;s needed to deliver the service (e.g. sending your confirmation email). If anything here isn&rsquo;t clear, contact us using the details in section 13.</p>
+    <p>We collect the name, phone number, email, and address you provide at booking to arrange and carry out the cleaning, and to send you a confirmation and any messages about that booking. If you tick the marketing opt-in box at booking, we may also contact you about future offers or reminders &mdash; you can opt out at any time by telling us via WhatsApp or email. We don&rsquo;t sell or share your details with third parties beyond what&rsquo;s needed to deliver the service (e.g. sending your confirmation email). Our <a href="privacy.html">privacy and cookie notice</a> explains in full what we collect, why, how long we keep it and your rights. If anything here isn&rsquo;t clear, contact us using the details in section 13.</p>
 
     <h2>13. Complaints and contact</h2>
     <p>If anything about your booking or the work carried out falls short, please tell us:</p>
@@ -308,6 +307,8 @@
     <p><a href="index.html">&larr; Back to EasyClean Somerset</a></p>
     <div class="foot-bottom">
       <span>© 2026 EasyClean Somerset. Sole trader.</span>
+      <a href="privacy.html">Privacy &amp; cookies</a>
+      <a href="#" data-cookie-settings>Cookie settings</a>
       <span>easycleansomerset@gmail.com</span>
     </div>
   </div>

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<!-- Analytics and Trustpilot only load after cookie consent: see consent.js.
+     gtag() calls before then just queue and are never sent without consent. -->
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+</script>
+<script src="consent.js" defer></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy &amp; Cookies | EasyClean Somerset</title>
+<meta name="description" content="How EasyClean Somerset collects, uses and protects your personal information, which cookies the site uses, and your rights.">
+<link rel="canonical" href="https://easycleansomerset.co.uk/privacy.html">
+
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* ============ TOKENS (kept identical to index.html) ============ */
+  :root {
+    --ink: #12232B;
+    --ink-soft: #2A3D46;
+    --paper: #F5F7F6;
+    --surface: #FFFFFF;
+    --teal: #0E7C86;
+    --teal-deep: #0A5960;
+    --teal-tint: #E4F0F0;
+    --slate: #5C6F73;
+    --line: #DCE3E2;
+    --stamp: #B5461E;
+    --stamp-tint: #FBEAE1;
+    --on-ink: #F5F7F6;
+    --shadow: 0 1px 2px rgba(18,35,43,0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #E9EEEC;
+      --ink-soft: #C4D0CD;
+      --paper: #0D1A1F;
+      --surface: #15262C;
+      --teal: #3FB8C4;
+      --teal-deep: #6ED2DB;
+      --teal-tint: #143137;
+      --slate: #8FA3A2;
+      --line: #24383E;
+      --stamp: #E58256;
+      --stamp-tint: #2C1B14;
+      --on-ink: #0D1A1F;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #E9EEEC;
+    --ink-soft: #C4D0CD;
+    --paper: #0D1A1F;
+    --surface: #15262C;
+    --teal: #3FB8C4;
+    --teal-deep: #6ED2DB;
+    --teal-tint: #143137;
+    --slate: #8FA3A2;
+    --line: #24383E;
+    --stamp: #E58256;
+    --stamp-tint: #2C1B14;
+    --on-ink: #0D1A1F;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  h1, h2, .display {
+    font-family: "Big Shoulders Display", system-ui, sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
+    line-height: 0.95;
+    text-wrap: balance;
+    margin: 0;
+    color: var(--ink);
+  }
+  a { color: var(--teal-deep); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+
+  /* ============ NAV (identical to index.html) ============ */
+  header.site {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .navrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    max-width: 1120px;
+    margin: 0 auto;
+    gap: 16px;
+  }
+  .wordmark {
+    font-family: "Big Shoulders Display", sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    font-size: 25px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .wordmark span { color: var(--teal); }
+  a.wordmark-link { text-decoration: none; color: inherit; display: inline-block; }
+  a.wordmark-link:hover .wordmark { color: var(--teal-deep); }
+  nav.links { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  nav.links a { text-decoration: none; font-size: 14.5px; font-weight: 600; color: var(--ink-soft); }
+  nav.links a:hover { color: var(--teal-deep); }
+  @media (max-width: 460px) {
+    .navrow { padding: 14px 16px; gap: 8px; flex-wrap: wrap; row-gap: 10px; }
+    .wordmark { font-size: 23px; }
+    nav.links { gap: 14px; }
+  }
+
+  /* ============ CONTENT ============ */
+  .tc-hero { padding: 56px 24px 8px; }
+  .tc-hero .eyebrow {
+    font-family: "Public Sans", sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--teal-deep);
+    margin-bottom: 10px;
+  }
+  .tc-hero h1 { font-size: clamp(30px, 5vw, 44px); }
+  .tc-updated { color: var(--slate); font-size: 13.5px; margin-top: 14px; }
+  .tc-body { padding: 24px 24px 80px; }
+  .tc-body h2 {
+    font-family: "Public Sans", sans-serif;
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 19px;
+    color: var(--ink);
+    margin: 38px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .tc-body h2:first-of-type { margin-top: 6px; }
+  .tc-body p { color: var(--ink-soft); margin: 0 0 14px; }
+  .tc-body ul { color: var(--ink-soft); margin: 0 0 14px; padding-left: 20px; }
+  .tc-body li { margin-bottom: 6px; }
+  .tc-body strong { color: var(--ink); }
+  .tc-intro {
+    padding: 16px 18px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--ink-soft);
+    font-size: 15px;
+    margin-bottom: 8px;
+  }
+
+  /* ============ FOOTER (identical to index.html) ============ */
+  footer.site { background: var(--ink); color: var(--on-ink); padding: 48px 0 30px; margin-top: 20px; }
+  footer.site p { color: color-mix(in srgb, var(--on-ink) 75%, transparent); font-size: 14.5px; margin: 0; }
+  footer.site a { color: var(--on-ink); }
+  .foot-bottom {
+    margin-top: 26px;
+    padding-top: 20px;
+    border-top: 1px solid color-mix(in srgb, var(--on-ink) 16%, transparent);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 12.5px;
+    color: color-mix(in srgb, var(--on-ink) 50%, transparent);
+  }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="navrow">
+    <a href="index.html" class="wordmark-link" aria-label="EasyClean Somerset home"><span class="wordmark">Easy<span>Clean</span> Somerset</span></a>
+    <nav class="links">
+      <a href="index.html">Home</a>
+      <a href="index.html#book">Book online</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap tc-hero">
+    <div class="eyebrow">Legal</div>
+    <h1>Privacy &amp; Cookies</h1>
+    <p class="tc-updated">Last updated: 2 October 2026</p>
+  </div>
+
+  <div class="wrap tc-body">
+    <p class="tc-intro">This notice explains what personal information <strong>EasyClean Somerset</strong> collects, why, who it&rsquo;s shared with, how long it&rsquo;s kept, and your rights. It also explains the cookies this website uses.</p>
+
+    <h2>1. Who we are</h2>
+    <p>EasyClean Somerset is Niall Maher, a sole trader, of 33 Ivy Walk, Midsomer Norton, BA3 2EE. We&rsquo;re responsible (the &ldquo;controller&rdquo;) for the personal information described here. Contact: <a href="mailto:easycleansomerset@gmail.com">easycleansomerset@gmail.com</a> or WhatsApp 07873 212249.</p>
+
+    <h2>2. What we collect</h2>
+    <ul>
+      <li><strong>When you book:</strong> your name, phone number, email, the property address and postcode, what you&rsquo;d like cleaned, the price, your appointment time, how you&rsquo;d like to pay, any referral or offer code, and whether you&rsquo;d like marketing messages.</li>
+      <li><strong>Landlord and letting agent bookings, additionally:</strong> the business name, your own reference, and either the name and phone number of the person who&rsquo;ll let us in, or a note that you&rsquo;ll arrange access with us.</li>
+      <li><strong>When the job is done:</strong> a signature confirming the work is complete (or a note of why there isn&rsquo;t one), the invoice, and whether and when it was paid.</li>
+      <li><strong>When you contact us:</strong> whatever you send us by email or WhatsApp, such as photos of a stain or rug.</li>
+      <li><strong>If you agree to analytics cookies:</strong> how you use this website (see section 7).</li>
+    </ul>
+
+    <h2>3. Why we use it, and the legal basis</h2>
+    <ul>
+      <li><strong>To arrange, carry out and invoice your clean</strong>, send your confirmation, reminders and invoice, and handle any guarantee claim. Basis: it&rsquo;s needed for our contract with you.</li>
+      <li><strong>To keep business and tax records.</strong> Basis: legal obligation.</li>
+      <li><strong>To keep the booking system working and stop misuse</strong> (for example, fake bookings). Basis: our legitimate interests.</li>
+      <li><strong>To send offers and cleaning reminders</strong>, only if you ticked the box at booking. Basis: your consent, which you can withdraw at any time by telling us.</li>
+      <li><strong>Analytics and the Trustpilot review widget</strong>, only if you accept cookies. Basis: your consent.</li>
+    </ul>
+
+    <h2>4. Who we share it with</h2>
+    <p>We don&rsquo;t sell your information. We use a small number of services to run the business, which handle it on our behalf:</p>
+    <ul>
+      <li><strong>Google</strong> (Gmail, Calendar, Sheets, Drive and Apps Script), where bookings, invoices, signatures and emails are stored and processed.</li>
+      <li><strong>GitHub Pages</strong>, which hosts this website and keeps standard server logs (such as IP addresses).</li>
+      <li><strong>Google Analytics</strong>, only if you accept cookies.</li>
+      <li><strong>Trustpilot</strong>, if you accept cookies (its review widget) or choose to leave a review.</li>
+      <li><strong>WhatsApp</strong>, if you message us there.</li>
+    </ul>
+    <p>For landlord and letting agent bookings, we share job details with the agency that booked, and may contact the tenant or site contact they gave us. We&rsquo;d also share information if the law required it. Some of these services may store data outside the UK; where they do, they use the safeguards UK law requires.</p>
+
+    <h2>5. How long we keep it</h2>
+    <ul>
+      <li><strong>Booking, invoice and payment records, including completion signatures:</strong> six years after the job, because we have to keep tax records.</li>
+      <li><strong>Marketing preferences:</strong> until you tell us to stop.</li>
+      <li><strong>Emails and WhatsApp messages:</strong> for as long as they&rsquo;re useful for the booking or any follow-up, then deleted.</li>
+      <li><strong>Analytics:</strong> kept by Google Analytics for up to 14 months.</li>
+    </ul>
+
+    <h2>6. Your rights</h2>
+    <p>You can ask us for a copy of the information we hold about you, ask us to correct it, ask us to delete it (unless we have to keep it, for example for tax), object to how we use it, or withdraw any consent you&rsquo;ve given. Just email or WhatsApp us using the details in section 1. If you&rsquo;re unhappy with how we&rsquo;ve handled your information, you can complain to the Information Commissioner&rsquo;s Office at <a href="https://ico.org.uk/make-a-complaint/" target="_blank" rel="noopener">ico.org.uk</a> or on 0303 123 1113, though we&rsquo;d appreciate the chance to put it right first.</p>
+
+    <h2 id="cookies">7. Cookies</h2>
+    <p>This site sets no cookies unless you choose to allow them. When you first visit, we ask whether you&rsquo;re happy for us to use:</p>
+    <ul>
+      <li><strong>Google Analytics</strong> (cookies named <code>_ga</code> and <code>_ga_&hellip;</code>), which tells us how people find and use the site, for example which pages lead to bookings. It doesn&rsquo;t identify you by name.</li>
+      <li><strong>Trustpilot&rsquo;s review widget</strong> on the homepage, which may set its own cookies inside the widget. If you say no, you&rsquo;ll see a plain link to our Trustpilot page instead.</li>
+    </ul>
+    <p>Your choice is saved in your browser (not in a cookie) so we don&rsquo;t ask on every page, and we ask again after 12 months. You can change your mind at any time with the <a href="#" data-cookie-settings>Cookie settings</a> link at the bottom of every page; saying no after saying yes removes the analytics cookies.</p>
+
+    <h2>8. Changes to this notice</h2>
+    <p>We&rsquo;ll update this notice if what we collect or how we use it changes. The date at the top shows when it was last updated.</p>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p><a href="index.html">&larr; Back to EasyClean Somerset</a></p>
+    <div class="foot-bottom">
+      <span>© 2026 EasyClean Somerset. Sole trader.</span>
+      <a href="privacy.html">Privacy &amp; cookies</a>
+      <a href="#" data-cookie-settings>Cookie settings</a>
+      <span>easycleansomerset@gmail.com</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
