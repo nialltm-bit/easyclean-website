@@ -610,6 +610,8 @@
   }
   .bf-row input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .bf-pay-note { margin: 2px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--ink); }
+  .bf-row label.bf-choice { display: flex; align-items: center; gap: 10px; font-size: 15px; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--ink); cursor: pointer; padding: 6px 0; }
+  .bf-choice input[type="radio"] { width: 18px; height: 18px; flex: none; accent-color: var(--teal); margin: 0; }
   .bf-row label.bf-checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink-soft); cursor: pointer; }
   .bf-checkbox-row input[type="checkbox"] { width: 16px; height: 16px; flex: none; accent-color: var(--teal); }
   .bf-days-nav {
@@ -1088,11 +1090,14 @@
             <div class="bf-row"><label for="bf-postcode">Property postcode</label><input type="text" id="bf-postcode" autocomplete="postal-code" required></div>
           </div>
           <div class="bf-row">
-            <label>Contact on the day <span style="text-transform:none; font-weight:400;">(whoever will actually let us in, even if that's you)</span></label>
-            <div class="bf-grid" style="margin-top:6px;">
-              <div class="bf-row"><label for="bf-site-contact-name">Name</label><input type="text" id="bf-site-contact-name" autocomplete="off" required></div>
-              <div class="bf-row"><label for="bf-site-contact-phone">Phone</label><input type="tel" id="bf-site-contact-phone" autocomplete="off" required></div>
+            <label>Access on the day</label>
+            <label class="bf-choice"><input type="radio" name="bf-access" value="onsite" checked> Someone will be there to let us in</label>
+            <div class="bf-grid" id="bf-site-contact" style="margin:6px 0 4px;">
+              <div class="bf-row"><label for="bf-site-contact-name">Their name</label><input type="text" id="bf-site-contact-name" autocomplete="off" required></div>
+              <div class="bf-row"><label for="bf-site-contact-phone">Their phone</label><input type="tel" id="bf-site-contact-phone" autocomplete="off" required></div>
             </div>
+            <label class="bf-choice"><input type="radio" name="bf-access" value="arrange"> We&#8217;ll arrange access with you at least 24 hours before</label>
+            <p class="bf-pay-note" id="bf-access-note" style="display:none;">Just get in touch at least 24 hours before the clean to let us know how we&#8217;ll get in, for example keys from your office, a lockbox code or the tenant&#8217;s details.</p>
           </div>
           <div class="bf-row">
             <label>Payment</label>
@@ -1588,14 +1593,34 @@
       document.getElementById("bf-email").value.trim() &&
       document.getElementById("bf-address").value.trim() &&
       document.getElementById("bf-postcode").value.trim() &&
-      document.getElementById("bf-site-contact-name").value.trim() &&
-      document.getElementById("bf-site-contact-phone").value.trim();
+      (accessArrange() || (
+        document.getElementById("bf-site-contact-name").value.trim() &&
+        document.getElementById("bf-site-contact-phone").value.trim()));
     var btn = document.getElementById("bf-submit");
     if (ok) btn.removeAttribute("disabled"); else btn.setAttribute("disabled", "disabled");
   }
 
   ["bf-name", "bf-business", "bf-phone", "bf-email", "bf-address", "bf-postcode", "bf-site-contact-name", "bf-site-contact-phone"].forEach(function (id) {
     document.getElementById(id).addEventListener("input", updateSubmitEnabled);
+  });
+
+  // Access on the day: a named person on site, or the agent arranging
+  // access with us at least 24 hours before (no one named at booking).
+  function accessArrange() {
+    var el = document.querySelector('input[name="bf-access"]:checked');
+    return !!el && el.value === "arrange";
+  }
+  function applyAccessChoice() {
+    var arrange = accessArrange();
+    document.getElementById("bf-site-contact").style.display = arrange ? "none" : "";
+    document.getElementById("bf-access-note").style.display = arrange ? "block" : "none";
+    ["bf-site-contact-name", "bf-site-contact-phone"].forEach(function (id) {
+      document.getElementById(id).required = !arrange;
+    });
+    updateSubmitEnabled();
+  }
+  document.querySelectorAll('input[name="bf-access"]').forEach(function (r) {
+    r.addEventListener("change", applyAccessChoice);
   });
 
   document.getElementById("bf-days-prev").addEventListener("click", function () {
@@ -1671,8 +1696,9 @@
       phone: document.getElementById("bf-phone").value.trim(),
       email: document.getElementById("bf-email").value.trim(),
       address: document.getElementById("bf-address").value.trim() + ", " + document.getElementById("bf-postcode").value.trim(),
-      siteContactName: document.getElementById("bf-site-contact-name").value.trim(),
-      siteContactPhone: document.getElementById("bf-site-contact-phone").value.trim(),
+      accessArrange: accessArrange(),
+      siteContactName: accessArrange() ? "" : document.getElementById("bf-site-contact-name").value.trim(),
+      siteContactPhone: accessArrange() ? "" : document.getElementById("bf-site-contact-phone").value.trim(),
       // Agent/landlord bookings are always invoiced (14 days, bank transfer),
       // no cash option. Code.gs treats any agent payment value other than
       // "Cash" as a payment-due invoice.
