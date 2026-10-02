@@ -185,6 +185,10 @@
           showState("state-already");
           return;
         }
+        if (data.cancelled) {
+          showError("This booking has been cancelled, so there's nothing to sign. Questions? Message EasyClean Somerset on WhatsApp or reply to your booking email.");
+          return;
+        }
         document.getElementById("job-details").innerHTML =
           detailRow("Customer", data.name) +
           detailRow("Address", data.address) +
