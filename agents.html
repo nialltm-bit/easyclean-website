@@ -700,6 +700,10 @@
   .bf-status { margin-top: 12px; padding: 10px 12px; border-radius: 5px; font-size: 13.5px; }
   .bf-status.err { background: color-mix(in srgb, var(--stamp) 20%, transparent); color: var(--ink); }
   .bf-status.ok { background: color-mix(in srgb, var(--teal) 16%, transparent); color: var(--teal-deep); }
+  .bf-area-msg { padding: 12px 14px; border-radius: 5px; font-size: 14.5px; line-height: 1.5; background: color-mix(in srgb, var(--stamp) 14%, transparent); color: var(--ink); }
+  .bf-area-msg p { margin: 0 0 10px; }
+  .bf-area-msg p:last-child { margin-bottom: 0; }
+  .bf-area-msg .btn { display: inline-block; }
   .bf-alt-day { margin-top: 16px; font-size: 15px; color: var(--slate); text-align: left; }
   .bf-alt-day a { color: var(--teal-deep); font-weight: 600; }
   .booking-confirmed {
@@ -1091,6 +1095,7 @@
             <div class="bf-row bf-row-wide"><label for="bf-email">Your email</label><input type="email" id="bf-email" autocomplete="email" required></div>
             <div class="bf-row bf-row-wide"><label for="bf-address">Property address</label><input type="text" id="bf-address" autocomplete="street-address" required></div>
             <div class="bf-row"><label for="bf-postcode">Property postcode</label><input type="text" id="bf-postcode" autocomplete="postal-code" required></div>
+            <div class="bf-row-wide bf-area-msg" id="bf-area-msg" role="status" aria-live="polite" style="display:none;"></div>
           </div>
           <div class="bf-row">
             <label>Access on the day</label>
@@ -1190,6 +1195,7 @@
   </div>
 </footer>
 
+<script src="service-area.js"></script>
 <script>
 (function () {
   "use strict";
@@ -1590,6 +1596,44 @@
     });
   }
 
+  // ---- Service area ----
+  // The list of postcode districts we take online bookings in lives in
+  // service-area.js (one place, also read by the booking system). Outside
+  // it, Confirm stays off and the visitor is offered WhatsApp instead.
+  // If that file ever fails to load, the page lets the booking through and
+  // the booking system still checks it.
+  var areaTouched = false;
+  function postcodeArea() {
+    if (typeof window.ecPostcodeCheck !== "function") return { status: "ok" };
+    return window.ecPostcodeCheck(document.getElementById("bf-postcode").value);
+  }
+  function renderAreaMsg() {
+    var el = document.getElementById("bf-area-msg");
+    var r = postcodeArea();
+    if (r.status === "out") {
+      el.innerHTML = '<p>' + 'We don&#8217;t take online bookings for properties in ' + escapeHtml(r.outward) + ' yet. Message us and we&#8217;ll see what we can do.' + '</p>' +
+        '<a class="btn btn-wa" target="_blank" rel="noopener" href="' + waLink("Hi EasyClean Somerset, this is a landlord/agent booking for a property in " + r.formatted + (currentSelection.lines.length ? ". Here's what I need done: " + currentSelection.lines.join(", ") + ". Total from your website: " + formatGBP(currentSelection.total) : "") + ". Do you cover that area?") + '">Message us on WhatsApp</a>';
+      el.style.display = "block";
+    } else if (r.status === "invalid" && areaTouched) {
+      el.innerHTML = '<p>Please enter the full postcode, for example BA3 2EE.</p>';
+      el.style.display = "block";
+    } else {
+      el.style.display = "none";
+      el.innerHTML = "";
+    }
+  }
+  document.getElementById("bf-postcode").addEventListener("input", function () {
+    // Only nag about the format once they've left the box, but show
+    // in/out of area as soon as a full postcode is typed.
+    renderAreaMsg();
+  });
+  document.getElementById("bf-postcode").addEventListener("blur", function () {
+    areaTouched = true;
+    var r = postcodeArea();
+    if (r.formatted) this.value = r.formatted; // tidy to e.g. "BS14 8AB"
+    renderAreaMsg();
+  });
+
   function updateSubmitEnabled() {
     var ok = !!selectedSlot &&
       document.getElementById("bf-name").value.trim() &&
@@ -1597,7 +1641,7 @@
       document.getElementById("bf-phone").value.trim() &&
       document.getElementById("bf-email").value.trim() &&
       document.getElementById("bf-address").value.trim() &&
-      document.getElementById("bf-postcode").value.trim() &&
+      postcodeArea().status === "ok" &&
       (accessArrange() || (
         document.getElementById("bf-site-contact-name").value.trim() &&
         document.getElementById("bf-site-contact-phone").value.trim()));
@@ -1701,6 +1745,7 @@
       phone: document.getElementById("bf-phone").value.trim(),
       email: document.getElementById("bf-email").value.trim(),
       address: document.getElementById("bf-address").value.trim() + ", " + document.getElementById("bf-postcode").value.trim(),
+      postcode: document.getElementById("bf-postcode").value.trim(),
       accessArrange: accessArrange(),
       siteContactName: accessArrange() ? "" : document.getElementById("bf-site-contact-name").value.trim(),
       siteContactPhone: accessArrange() ? "" : document.getElementById("bf-site-contact-phone").value.trim(),
@@ -1728,6 +1773,19 @@
       .then(function (r) { return r.json(); })
       .then(function (data) {
         if (!data.ok) {
+          if (data.error === "out_of_area" || data.error === "bad_postcode") {
+            areaTouched = true;
+            renderAreaMsg();
+            if (data.error === "out_of_area") {
+              statusEl.innerHTML = 'We don’t take online bookings in that area yet. <a href="' + waLink("Hi EasyClean Somerset, this is a landlord/agent booking for a property in " + payload.postcode + ". " + payload.items + ". Do you cover that area?") + '" target="_blank" rel="noopener">Message us on WhatsApp</a> and we’ll see what we can do.';
+            } else {
+              statusEl.textContent = "Please check the postcode, it doesn’t look like a full UK postcode.";
+            }
+            statusEl.className = "bf-status err";
+            statusEl.style.display = "block";
+            submitBtn.removeAttribute("disabled");
+            return;
+          }
           if (data.error === "slot_taken") {
             statusEl.textContent = "That time was just taken. Pick another below.";
             statusEl.className = "bf-status err";
