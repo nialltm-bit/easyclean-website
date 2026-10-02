@@ -1,3 +1,7 @@
+---
+layout: null
+# The price rows on this page come from _data/prices.yml (GitHub builds them in).
+---
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -58,21 +62,9 @@
     "@type": "OfferCatalog",
     "name": "Carpet, upholstery, mattress and rug cleaning",
     "itemListElement": [
-      { "@type": "Offer", "price": "35", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Small room carpet cleaning" } },
-      { "@type": "Offer", "price": "45", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Medium room carpet cleaning" } },
-      { "@type": "Offer", "price": "75", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Large room carpet cleaning" } },
-      { "@type": "Offer", "price": "50", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Stairs and landing (one flight) carpet cleaning" } },
-      { "@type": "Offer", "price": "25", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Armchair upholstery cleaning" } },
-      { "@type": "Offer", "price": "40", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Loveseat / 2-seater sofa cleaning" } },
-      { "@type": "Offer", "price": "55", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "3-seater sofa cleaning" } },
-      { "@type": "Offer", "price": "75", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "4-seater / corner sofa cleaning" } },
-      { "@type": "Offer", "price": "15", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Footstool / pouffe cleaning" } },
-      { "@type": "Offer", "price": "40", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Mattress cleaning (single/double)" } },
-      { "@type": "Offer", "price": "55", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Mattress cleaning (king/super king)" } },
-      { "@type": "Offer", "price": "25", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Small rug cleaning" } },
-      { "@type": "Offer", "price": "40", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Medium rug cleaning" } },
-      { "@type": "Offer", "price": "60", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Large rug cleaning" } },
-      { "@type": "Offer", "price": "55", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "Car interior cleaning (all seats)" } }
+      {%- for p in site.data.prices %}
+      { "@type": "Offer", "price": "{{ p.price }}", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": "{{ p.google_name }}" } }{% unless forloop.last %},{% endunless %}
+      {%- endfor %}
     ]
   }
 }
@@ -408,7 +400,7 @@
     align-items: start;
   }
   @media (max-width: 900px) {
-    .calc-grid { grid-template-columns: 1fr; }
+    .calc-grid { grid-template-columns: minmax(0, 1fr); }
     .summary-card { position: static; }
   }
   .item-group { margin-bottom: 30px; scroll-margin-top: 90px; border-radius: 6px; }
@@ -507,6 +499,12 @@
   }
   @media (max-width: 640px) {
     .item-row { grid-template-columns: 1fr 44px auto; gap: 10px; }
+  }
+  /* Narrow phones: let the name column shrink and wrap,
+     so a long name never pushes a row past the screen. */
+  @media (max-width: 400px) {
+    .item-row { grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; }
+    .item-row .name { overflow-wrap: anywhere; }
   }
   .rug-note {
     font-size: 14.5px;
@@ -1012,94 +1010,48 @@
           <div class="item-group" id="carpet-cleaning">
             <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-rooms"><span class="igt-label">Rooms</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
             <div class="item-group-body" id="group-rooms">
-            <div class="item-row" data-item="Small room" data-price="35" data-mins="25" data-meta="Bedroom, hallway">
-              <div class="info"><span class="name">Small room</span><span class="meta">Bedroom, hallway</span></div>
-              <span class="price mono">£35</span>
+{%- for p in site.data.prices %}{% if p.group == "rooms" %}
+            <div class="item-row" data-item="{{ p.item }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" }}">
+              <div class="info"><span class="name">{{ p.shown_as | default: p.item }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta }}</span>{% endif %}</div>
+              <span class="price mono">£{{ p.price }}</span>
               <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="Medium room" data-price="45" data-mins="35" data-meta="Double bedroom, dining room">
-              <div class="info"><span class="name">Medium room</span><span class="meta">Double bedroom, dining room</span></div>
-              <span class="price mono">£45</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="Large room" data-price="75" data-mins="55" data-meta="Lounge, open-plan">
-              <div class="info"><span class="name">Large room</span><span class="meta">Lounge, open-plan</span></div>
-              <span class="price mono">£75</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="Stairs and landing (one flight)" data-price="50" data-mins="35" data-meta="Every step plus the landing carpet">
-              <div class="info"><span class="name">Stairs and landing (one flight)</span><span class="meta">Every step plus the landing carpet</span></div>
-              <span class="price mono">£50</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
+            </div>{% endif %}{% endfor %}
             </div>
           </div>
 
           <div class="item-group" id="upholstery-cleaning">
             <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-sofas"><span class="igt-label">Sofas &amp; seating</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
             <div class="item-group-body" id="group-sofas">
-            <div class="item-row" data-item="Armchair" data-price="25" data-mins="20" data-meta="">
-              <div class="info"><span class="name">Armchair</span></div>
-              <span class="price mono">£25</span>
+{%- for p in site.data.prices %}{% if p.group == "sofas" %}
+            <div class="item-row" data-item="{{ p.item }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" }}">
+              <div class="info"><span class="name">{{ p.shown_as | default: p.item }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta }}</span>{% endif %}</div>
+              <span class="price mono">£{{ p.price }}</span>
               <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="Loveseat / 2-seater" data-price="40" data-mins="30" data-meta="">
-              <div class="info"><span class="name">Loveseat / 2-seater sofa</span></div>
-              <span class="price mono">£40</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="3-seater sofa" data-price="55" data-mins="40" data-meta="">
-              <div class="info"><span class="name">3-seater sofa</span></div>
-              <span class="price mono">£55</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="4-seater / corner sofa" data-price="75" data-mins="55" data-meta="">
-              <div class="info"><span class="name">4-seater / corner sofa</span></div>
-              <span class="price mono">£75</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="Footstool / pouffe" data-price="15" data-mins="10" data-meta="">
-              <div class="info"><span class="name">Footstool / pouffe</span></div>
-              <span class="price mono">£15</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
+            </div>{% endif %}{% endfor %}
             </div>
           </div>
 
           <div class="item-group" id="mattress-cleaning">
             <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-mattresses"><span class="igt-label">Mattresses</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
             <div class="item-group-body" id="group-mattresses">
-            <div class="item-row" data-item="Mattress (single/double)" data-price="40" data-mins="30" data-meta="">
-              <div class="info"><span class="name">Single / double</span></div>
-              <span class="price mono">£40</span>
+{%- for p in site.data.prices %}{% if p.group == "mattresses" %}
+            <div class="item-row" data-item="{{ p.item }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" }}">
+              <div class="info"><span class="name">{{ p.shown_as | default: p.item }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta }}</span>{% endif %}</div>
+              <span class="price mono">£{{ p.price }}</span>
               <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="Mattress (king/super king)" data-price="55" data-mins="40" data-meta="">
-              <div class="info"><span class="name">King / super king</span></div>
-              <span class="price mono">£55</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
+            </div>{% endif %}{% endfor %}
             </div>
           </div>
 
           <div class="item-group" id="rug-cleaning">
             <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-rugs"><span class="igt-label">Rugs</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
             <div class="item-group-body" id="group-rugs">
-            <div class="item-row" data-item="Small rug" data-price="25" data-mins="20" data-meta="Up to approx. 4ft x 6ft">
-              <div class="info"><span class="name">Small rug</span><span class="meta">Up to approx. 4ft × 6ft</span></div>
-              <span class="price mono">£25</span>
+{%- for p in site.data.prices %}{% if p.group == "rugs" %}
+            <div class="item-row" data-item="{{ p.item }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" }}">
+              <div class="info"><span class="name">{{ p.shown_as | default: p.item }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta }}</span>{% endif %}</div>
+              <span class="price mono">£{{ p.price }}</span>
               <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="Medium rug" data-price="40" data-mins="30" data-meta="Approx. 5ft x 8ft">
-              <div class="info"><span class="name">Medium rug</span><span class="meta">Approx. 5ft × 8ft</span></div>
-              <span class="price mono">£40</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
-            <div class="item-row" data-item="Large rug" data-price="60" data-mins="45" data-meta="6ft x 9ft and above">
-              <div class="info"><span class="name">Large rug</span><span class="meta">6ft × 9ft and above</span></div>
-              <span class="price mono">£60</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
+            </div>{% endif %}{% endfor %}
             <div class="rug-note">Wool, silk, antique or heavily fringed rugs carry a real risk of shrinkage or colour bleed, please use Quick Quote instead so we can assess from photos first.</div>
             </div>
           </div>
@@ -1107,11 +1059,12 @@
           <div class="item-group" id="car-interior-cleaning">
             <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-vehicle"><span class="igt-label">Vehicle interior</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
             <div class="item-group-body" id="group-vehicle">
-            <div class="item-row" data-item="Car interior (all seats)" data-price="55" data-mins="40" data-meta="2 front seats and the full back seat">
-              <div class="info"><span class="name">Car interior (all seats)</span><span class="meta">2 front seats and the full back seat</span></div>
-              <span class="price mono">£55</span>
+{%- for p in site.data.prices %}{% if p.group == "vehicle" %}
+            <div class="item-row" data-item="{{ p.item }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" }}">
+              <div class="info"><span class="name">{{ p.shown_as | default: p.item }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta }}</span>{% endif %}</div>
+              <span class="price mono">£{{ p.price }}</span>
               <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
-            </div>
+            </div>{% endif %}{% endfor %}
             </div>
           </div>
         </div>
