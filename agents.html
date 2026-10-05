@@ -3,7 +3,7 @@ layout: null
 # The price rows on this page come from _data/prices.yml (GitHub builds them in).
 ---
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-GB">
 <head>
 <!-- Analytics and Trustpilot only load after cookie consent: see consent.js.
      gtag() calls before then just queue and are never sent without consent. -->
@@ -76,6 +76,8 @@ layout: null
     --surface: #15262C;
     --teal: #3FB8C4;
     --teal-deep: #6ED2DB;
+    /* Teal for text on --ink panels (pillars, basket total, footer). */
+    --teal-on-ink: #0A5960;
     --teal-tint: #143137;
     --slate: #8FA3A2;
     --line: #24383E;
@@ -92,6 +94,7 @@ layout: null
       --surface: #FFFFFF;
       --teal: #0E7C86;
       --teal-deep: #0A5960;
+      --teal-on-ink: #3FB8C4;
       --teal-tint: #E4F0F0;
       --slate: #5C6F73;
       --line: #DCE3E2;
@@ -108,6 +111,7 @@ layout: null
     --surface: #FFFFFF;
     --teal: #0E7C86;
     --teal-deep: #0A5960;
+    --teal-on-ink: #3FB8C4;
     --teal-tint: #E4F0F0;
     --slate: #5C6F73;
     --line: #DCE3E2;
@@ -297,7 +301,7 @@ layout: null
     color: var(--on-ink);
   }
   .pillars h2 { color: var(--on-ink); font-size: clamp(30px, 4vw, 44px); }
-  .pillars .eyebrow { color: var(--teal); }
+  .pillars .eyebrow { color: var(--teal-on-ink); }
   .pillar-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -318,7 +322,7 @@ layout: null
     text-transform: uppercase;
     font-size: 18px;
     letter-spacing: 0.08em;
-    color: var(--teal);
+    color: var(--teal-on-ink);
     margin-bottom: 14px;
   }
   .pillar h3 { color: var(--on-ink); font-size: 25px; text-transform: none; margin-bottom: 10px; }
@@ -371,24 +375,38 @@ layout: null
     0% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 55%, transparent); }
     100% { box-shadow: 0 0 0 3px transparent; }
   }
-  .item-group h4 {
+  .item-group h3 {
     font-family: "Public Sans", sans-serif;
     font-weight: 700;
     font-size: 12.5px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
+    line-height: 1.6;
+    text-wrap: wrap;
     color: var(--slate);
     margin: 0 0 12px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--line);
+  }
+  /* The heading's whole row is one button that shows or hides the group. */
+  .item-group-toggle {
     display: flex;
     align-items: center;
     gap: 8px;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    text-align: left;
+    color: inherit;
     cursor: pointer;
     user-select: none;
   }
-  .item-group h4 .igt-label { flex: 1; }
-  .item-group h4 .igt-count {
+  .item-group h3 .igt-label { flex: 1; }
+  .item-group h3 .igt-count {
     display: none;
     font-family: "Public Sans", sans-serif;
     font-weight: 700;
@@ -401,8 +419,8 @@ layout: null
     border-radius: 10px;
     flex: none;
   }
-  .item-group h4 .igt-count.show { display: inline-block; }
-  .item-group h4 .igt-toggle-text {
+  .item-group h3 .igt-count.show { display: inline-block; }
+  .item-group h3 .igt-toggle-text {
     font-family: "Public Sans", sans-serif;
     font-weight: 600;
     font-size: 12px;
@@ -411,13 +429,13 @@ layout: null
     color: var(--teal-deep);
     flex: none;
   }
-  .item-group h4 .igt-chev {
+  .item-group h3 .igt-chev {
     font-size: 10px;
     color: var(--teal-deep);
     flex: none;
     transition: transform 0.2s ease;
   }
-  .item-group.collapsed h4 .igt-chev { transform: rotate(-90deg); }
+  .item-group.collapsed h3 .igt-chev { transform: rotate(-90deg); }
   .item-group.collapsed .item-group-body { display: none; }
   .item-row {
     display: grid;
@@ -499,7 +517,7 @@ layout: null
     padding: 6px 0;
     color: color-mix(in srgb, var(--on-ink) 78%, transparent);
   }
-  .summary-empty { font-size: 14px; color: color-mix(in srgb, var(--on-ink) 55%, transparent); padding: 6px 0 14px; }
+  .summary-empty { font-size: 14px; color: color-mix(in srgb, var(--on-ink) 65%, transparent); padding: 6px 0 14px; }
   .summary-total {
     display: flex;
     justify-content: space-between;
@@ -509,7 +527,7 @@ layout: null
     padding-top: 14px;
   }
   .summary-total .lab { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: color-mix(in srgb, var(--on-ink) 65%, transparent); }
-  .summary-total .amt { font-family: "Public Sans", sans-serif; font-size: 30px; font-weight: 600; color: var(--teal); }
+  .summary-total .amt { font-family: "Public Sans", sans-serif; font-size: 30px; font-weight: 600; color: var(--teal-on-ink); }
   .summary-time {
     display: flex;
     justify-content: space-between;
@@ -602,7 +620,11 @@ layout: null
   .bf-row-wide { grid-column: 1 / -1; }
   .bf-row { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .bf-grid .bf-row { margin-top: 0; }
-  .bf-row label { font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate); font-weight: 600; }
+  /* Grouped choices (fieldset + legend) look like any other form row. A
+     floated legend sits in the row's flex layout like a label would. */
+  fieldset.bf-row { border: 0; padding: 0; margin-left: 0; margin-right: 0; }
+  .bf-row legend { float: left; padding: 0; }
+  .bf-row label, .bf-row legend, .bf-row .bf-label { font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate); font-weight: 600; }
   .bf-row input[type="text"], .bf-row input[type="tel"], .bf-row input[type="email"] {
     width: 100%;
     min-width: 0;
@@ -725,7 +747,8 @@ layout: null
     border: 1px solid color-mix(in srgb, var(--teal) 30%, transparent);
     scroll-margin-top: 90px; /* keeps the sticky header clear when this scrolls into view */
   }
-  .booking-confirmed h4 { text-transform: none; font-size: 20px; margin-bottom: 8px; color: var(--teal-deep); }
+  .booking-confirmed h3 { font-family: inherit; font-weight: 700; letter-spacing: normal; line-height: 1.6; text-wrap: wrap; text-transform: none; font-size: 20px; margin: 1.33em 0 8px; color: var(--teal-deep); }
+  .booking-confirmed:focus { outline: none; }
   .booking-confirmed p { color: var(--ink-soft); font-size: 14.5px; margin: 4px 0; }
   .booking-confirmed .ref { font-family: "Public Sans", sans-serif; font-weight: 700; color: var(--teal-deep); }
 
@@ -772,13 +795,15 @@ layout: null
     gap: 40px;
   }
   @media (max-width: 760px) { .foot-grid { grid-template-columns: 1fr; gap: 30px; } }
-  footer.site h5 {
+  footer.site h2 {
     font-family: "Public Sans", sans-serif;
     font-weight: 700;
     font-size: 12px;
     letter-spacing: 0.1em;
     text-transform: uppercase;
-    color: color-mix(in srgb, var(--on-ink) 55%, transparent);
+    line-height: 1.6;
+    text-wrap: wrap;
+    color: color-mix(in srgb, var(--on-ink) 65%, transparent);
     margin: 0 0 14px;
   }
   footer.site .wordmark { color: var(--on-ink); }
@@ -793,15 +818,33 @@ layout: null
     flex-wrap: wrap;
     gap: 10px;
     font-size: 12.5px;
-    color: color-mix(in srgb, var(--on-ink) 50%, transparent);
+    color: color-mix(in srgb, var(--on-ink) 65%, transparent);
   }
+  /* ============ SKIP LINK ============ */
+  /* The first thing a keyboard user reaches: jumps past the header to the
+     page's main content. Off-screen until it has focus. */
+  .skip-link {
+    position: absolute;
+    left: 12px;
+    top: -100px;
+    z-index: 200;
+    padding: 10px 16px;
+    border-radius: 4px;
+    background: var(--ink);
+    color: var(--on-ink);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .skip-link:focus { top: 12px; }
+  main:focus { outline: none; }
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to main content</a>
 
-<div class="audience-bar">
+<nav class="audience-bar" aria-label="Other booking page">
   <div class="audience-bar-inner">Homeowner or tenant?<a href="index.html">Book here</a></div>
-</div>
+</nav>
 
 <header class="site">
   <div class="navrow">
@@ -816,7 +859,7 @@ layout: null
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
   <!-- ============ HERO ============ -->
   <section class="hero">
     <div class="wrap hero-grid">
@@ -899,7 +942,7 @@ layout: null
       <div class="calc-grid">
         <div>
           <div class="item-group" id="carpet-cleaning">
-            <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-rooms"><span class="igt-label">Rooms</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
+            <h3><button type="button" class="item-group-toggle" aria-expanded="true" aria-controls="group-rooms"><span class="igt-label">Rooms</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></button></h3>
             <div class="item-group-body" id="group-rooms">
 {%- for p in site.data.prices %}{% if p.group == "rooms" and p.agents %}
             <div class="item-row" data-item="{{ p.item | escape }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" | escape }}">
@@ -911,7 +954,7 @@ layout: null
           </div>
 
           <div class="item-group" id="upholstery-cleaning">
-            <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-sofas"><span class="igt-label">Sofas &amp; seating</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
+            <h3><button type="button" class="item-group-toggle" aria-expanded="true" aria-controls="group-sofas"><span class="igt-label">Sofas &amp; seating</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></button></h3>
             <div class="item-group-body" id="group-sofas">
 {%- for p in site.data.prices %}{% if p.group == "sofas" and p.agents %}
             <div class="item-row" data-item="{{ p.item | escape }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" | escape }}">
@@ -923,7 +966,7 @@ layout: null
           </div>
 
           <div class="item-group" id="mattress-cleaning">
-            <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-mattresses"><span class="igt-label">Mattresses</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
+            <h3><button type="button" class="item-group-toggle" aria-expanded="true" aria-controls="group-mattresses"><span class="igt-label">Mattresses</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></button></h3>
             <div class="item-group-body" id="group-mattresses">
 {%- for p in site.data.prices %}{% if p.group == "mattresses" and p.agents %}
             <div class="item-row" data-item="{{ p.item | escape }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" | escape }}">
@@ -935,7 +978,7 @@ layout: null
           </div>
 
           <div class="item-group" id="rug-cleaning">
-            <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-rugs"><span class="igt-label">Rugs</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
+            <h3><button type="button" class="item-group-toggle" aria-expanded="true" aria-controls="group-rugs"><span class="igt-label">Rugs</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></button></h3>
             <div class="item-group-body" id="group-rugs">
 {%- for p in site.data.prices %}{% if p.group == "rugs" and p.agents %}
             <div class="item-row" data-item="{{ p.item | escape }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" | escape }}">
@@ -1000,10 +1043,10 @@ layout: null
             <div class="bf-row bf-row-wide"><label for="bf-email">Your email</label><input type="email" id="bf-email" autocomplete="email" required></div>
             <div class="bf-row bf-row-wide"><label for="bf-address">Property address</label><input type="text" id="bf-address" autocomplete="street-address" required></div>
             <div class="bf-row"><label for="bf-postcode">Property postcode</label><input type="text" id="bf-postcode" autocomplete="postal-code" required></div>
-            <div class="bf-row-wide bf-area-msg" id="bf-area-msg" role="status" aria-live="polite" style="display:none;"></div>
+            <div class="bf-row-wide bf-area-msg" id="bf-area-msg" style="display:none;"></div>
           </div>
-          <div class="bf-row">
-            <label>Access on the day</label>
+          <fieldset class="bf-row">
+            <legend>Access on the day</legend>
             <label class="bf-choice"><input type="radio" name="bf-access" value="onsite" checked> Someone will be there to let us in</label>
             <div class="bf-grid" id="bf-site-contact" style="margin:6px 0 4px;">
               <div class="bf-row"><label for="bf-site-contact-name">Their name</label><input type="text" id="bf-site-contact-name" autocomplete="off" required></div>
@@ -1011,13 +1054,13 @@ layout: null
             </div>
             <label class="bf-choice"><input type="radio" name="bf-access" value="arrange"> We&#8217;ll arrange access with you at least 24 hours before</label>
             <p class="bf-pay-note" id="bf-access-note" style="display:none;">Just get in touch at least 24 hours before the clean to let us know how we&#8217;ll get in, for example keys from your office, a lockbox code or the tenant&#8217;s details.</p>
-          </div>
+          </fieldset>
           <div class="bf-row">
-            <label>Payment</label>
+            <span class="bf-label">Payment</span>
             <p class="bf-pay-note">We&#8217;ll email an invoice once the job&#8217;s done, payable by bank transfer within 14 days.</p>
           </div>
-          <div class="bf-row">
-            <label>Choose a time</label>
+          <fieldset class="bf-row">
+            <legend>Choose a time</legend>
             <div id="bf-days-nav" class="bf-days-nav">
               <button type="button" id="bf-days-prev" class="bf-days-nav-btn" aria-label="Earlier days">&lsaquo;</button>
               <span id="bf-days-range" class="bf-days-range"></span>
@@ -1026,7 +1069,7 @@ layout: null
             <div id="bf-days" class="bf-days"><div class="bf-slots-loading">Checking available times&hellip;</div></div>
             <div id="bf-slots-label" class="bf-slot-day"></div>
             <div id="bf-slots" class="bf-slots"></div>
-          </div>
+          </fieldset>
           <div class="bf-row">
             <label for="bf-agency-id">Account / reference number <span style="text-transform:none; font-weight:400;">(optional)</span></label>
             <input type="text" id="bf-agency-id" autocomplete="off">
@@ -1073,18 +1116,18 @@ layout: null
   <div class="wrap">
     <div class="foot-grid">
       <div>
-        <div class="wordmark">Easy<span style="color:var(--teal);">Clean</span> Somerset</div>
+        <div class="wordmark">Easy<span style="color:var(--teal-on-ink);">Clean</span> Somerset</div>
         <p style="margin-top:14px; max-width:34ch;">Carpet, upholstery &amp; mattress cleaning across Somerset, Bath &amp; Bristol, fixed prices, booked online.</p>
       </div>
       <div>
-        <h5>Get a price</h5>
+        <h2>Get a price</h2>
         <p><a href="#prices">Select your items</a></p>
         <p><a href="#book" class="book-link">Book online</a></p>
         <p><a id="foot-wa" href="#" target="_blank" rel="noopener">WhatsApp Quick Quote</a></p>
         <p><a href="faq.html">FAQs</a></p>
       </div>
       <div>
-        <h5>Contact</h5>
+        <h2>Contact</h2>
         <p>WhatsApp: <a class="mono" href="https://wa.me/447873212249" target="_blank" rel="noopener">07873 212249</a></p>
         <p><a href="mailto:easycleansomerset@gmail.com">easycleansomerset@gmail.com</a></p>
         <p><a href="index.html">Booking for your own home instead?</a></p>

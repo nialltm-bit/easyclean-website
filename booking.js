@@ -68,6 +68,30 @@ window.ecBooking = function (config) {
     });
   }
 
+  // ---- Screen reader announcements ----
+  // Messages that appear on the page (basket changes, postcode and booking
+  // errors) are also read out by screen readers through this hidden live
+  // region. It has to be on the page before anything is put in it.
+  var announcer = document.createElement("div");
+  announcer.setAttribute("aria-live", "polite");
+  announcer.style.cssText = "position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;";
+  document.body.appendChild(announcer);
+  var announceTimer = null;
+  function announce(text) {
+    // Cleared first, with a short pause, so the same message twice in a row
+    // is still read out the second time.
+    announcer.textContent = "";
+    clearTimeout(announceTimer);
+    announceTimer = setTimeout(function () { announcer.textContent = text; }, 100);
+  }
+
+  // Smooth scrolling, unless the visitor has asked their device for less
+  // motion (the CSS already does the same for links).
+  function scrollBehavior() {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    return reduce ? "auto" : "smooth";
+  }
+
   function render() {
     var lines = [];
     var total = 0;
@@ -160,22 +184,18 @@ window.ecBooking = function (config) {
     });
   }
 
-  function toggleGroup(h4) {
-    var group = h4.closest(".item-group");
+  // Each group heading holds a real button, so Enter and Space work on
+  // their own.
+  function toggleGroup(btn) {
+    var group = btn.closest(".item-group");
     var collapsed = group.classList.toggle("collapsed");
-    h4.setAttribute("aria-expanded", collapsed ? "false" : "true");
-    var toggleText = h4.querySelector(".igt-toggle-text");
+    btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+    var toggleText = btn.querySelector(".igt-toggle-text");
     if (toggleText) toggleText.textContent = collapsed ? "See more" : "Hide";
   }
 
-  document.querySelectorAll(".item-group-toggle").forEach(function (h4) {
-    h4.addEventListener("click", function () { toggleGroup(h4); });
-    h4.addEventListener("keydown", function (e) {
-      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
-        e.preventDefault();
-        toggleGroup(h4);
-      }
-    });
+  document.querySelectorAll(".item-group-toggle").forEach(function (btn) {
+    btn.addEventListener("click", function () { toggleGroup(btn); });
   });
 
   rows.forEach(function (row) {
@@ -189,6 +209,7 @@ window.ecBooking = function (config) {
         if (action === "dec") state[name] = Math.max(state[name] - 1, 0);
         qtyEl.textContent = state[name];
         render();
+        announce(name + ": " + state[name] + ". Total " + formatGBP(currentSelection.total) + ".");
       });
     });
   });
@@ -200,14 +221,14 @@ window.ecBooking = function (config) {
   // there's no extra step that just sends the visitor back up the page.
   document.getElementById("logo-home").addEventListener("click", function (e) {
     e.preventDefault();
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    window.scrollTo({ top: 0, behavior: scrollBehavior() });
   });
 
   document.querySelectorAll(".book-link").forEach(function (link) {
     link.addEventListener("click", function (e) {
       if (currentSelection.total === 0) {
         e.preventDefault();
-        document.getElementById("prices").scrollIntoView({ behavior: "smooth", block: "start" });
+        document.getElementById("prices").scrollIntoView({ behavior: scrollBehavior(), block: "start" });
       }
     });
   });
@@ -393,10 +414,23 @@ window.ecBooking = function (config) {
         }
         selectedDay = day;
         renderDayPicker();
+        refocus(daysEl, ".bf-day-card", "data-day", day);
       });
     });
 
     renderSlots();
+  }
+
+  // Picking a day or time rebuilds the buttons, which would drop keyboard
+  // focus to the top of the page. Put it back on the button just pressed.
+  function refocus(container, selector, attr, value) {
+    var btns = container.querySelectorAll(selector);
+    for (var i = 0; i < btns.length; i++) {
+      if (btns[i].getAttribute(attr) === value) {
+        btns[i].focus();
+        return;
+      }
+    }
   }
 
   function renderSlots() {
@@ -423,6 +457,7 @@ window.ecBooking = function (config) {
       btn.addEventListener("click", function () {
         selectedSlot = btn.getAttribute("data-start");
         renderSlots();
+        refocus(slotsEl, ".bf-slot-btn", "data-start", selectedSlot);
         updateSubmitEnabled();
       });
     });
@@ -435,6 +470,7 @@ window.ecBooking = function (config) {
   // If that file ever fails to load, the page lets the booking through and
   // the booking system still checks it.
   var areaTouched = false;
+  var areaNote = ""; // last postcode note read out, so it isn't repeated on every keystroke
   function postcodeArea() {
     if (typeof window.ecPostcodeCheck !== "function") return { status: "ok" };
     return window.ecPostcodeCheck(document.getElementById("bf-postcode").value);
@@ -442,17 +478,22 @@ window.ecBooking = function (config) {
   function renderAreaMsg() {
     var el = document.getElementById("bf-area-msg");
     var r = postcodeArea();
+    var note = "";
     if (r.status === "out") {
-      el.innerHTML = '<p>' + escapeHtml(messages.outOfAreaNote(r.outward)) + '</p>' +
+      note = messages.outOfAreaNote(r.outward);
+      el.innerHTML = '<p>' + escapeHtml(note) + '</p>' +
         '<a class="btn btn-wa" target="_blank" rel="noopener" href="' + waLink(messages.outOfArea(r.formatted, currentSelection.lines.join(", "), formatGBP(currentSelection.total))) + '">Message us on WhatsApp</a>';
       el.style.display = "block";
     } else if (r.status === "invalid" && areaTouched) {
-      el.innerHTML = '<p>Please enter the full postcode, for example BA1 1AA.</p>';
+      note = "Please enter the full postcode, for example BA1 1AA.";
+      el.innerHTML = '<p>' + note + '</p>';
       el.style.display = "block";
     } else {
       el.style.display = "none";
       el.innerHTML = "";
     }
+    if (note && note !== areaNote) announce(note);
+    areaNote = note;
   }
   document.getElementById("bf-postcode").addEventListener("input", function () {
     // Only nag about the format once they've left the box, but show
@@ -507,13 +548,17 @@ window.ecBooking = function (config) {
     window.addEventListener("pageshow", applyAccessChoice);
   }
 
+  // On the first or last page an arrow switches off, which would drop
+  // keyboard focus, so it moves to the other arrow instead.
   document.getElementById("bf-days-prev").addEventListener("click", function () {
     dayPage--;
     renderDayPicker();
+    if (this.disabled) document.getElementById("bf-days-next").focus();
   });
   document.getElementById("bf-days-next").addEventListener("click", function () {
     dayPage++;
     renderDayPicker();
+    if (this.disabled) document.getElementById("bf-days-prev").focus();
   });
 
   function showConfirmed(reference, payload) {
@@ -550,7 +595,7 @@ window.ecBooking = function (config) {
     var confirmedEl = document.getElementById("booking-confirmed");
     confirmedEl.style.display = "block";
     confirmedEl.innerHTML =
-      "<h4>Booked ✓</h4>" +
+      "<h3>Booked ✓</h3>" +
       "<p>Thanks " + escapeHtml(payload.name) + ", you're confirmed for <strong>" + escapeHtml(payload.slotLabel) + "</strong>.</p>" +
       '<p>Reference <span class="ref">' + escapeHtml(reference) + "</span>, keep this handy if you need to get in touch.</p>" +
       "<p>A confirmation has been sent to " + escapeHtml(payload.email) + ".</p>";
@@ -560,7 +605,13 @@ window.ecBooking = function (config) {
     // looking at whatever now scrolled up to fill that space — the area
     // below, not the confirmation. Bring it into view explicitly so the
     // reference number is the thing they see immediately.
-    confirmedEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    confirmedEl.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
+
+    // The Confirm button that had focus has gone too. Moving focus to the
+    // confirmation means screen readers read it out, and keyboard users
+    // carry on from here rather than the top of the page.
+    confirmedEl.setAttribute("tabindex", "-1");
+    confirmedEl.focus({ preventScroll: true });
   }
 
   function value(id) {
@@ -622,6 +673,7 @@ window.ecBooking = function (config) {
             }
             statusEl.className = "bf-status err";
             statusEl.style.display = "block";
+            announce(statusEl.textContent);
             updateSubmitEnabled();
             return;
           }
@@ -629,6 +681,7 @@ window.ecBooking = function (config) {
             statusEl.textContent = "That time was just taken. Pick another below.";
             statusEl.className = "bf-status err";
             statusEl.style.display = "block";
+            announce(statusEl.textContent);
             selectedSlot = null;
             slotsLoaded = false;
             updateBookingSection();
@@ -643,6 +696,7 @@ window.ecBooking = function (config) {
         statusEl.innerHTML = 'Something went wrong on our end. <a href="' + waLink(messages.bookingFailed(payload)) + '" target="_blank" rel="noopener">Send us your details on WhatsApp</a> and we’ll confirm manually.';
         statusEl.className = "bf-status err";
         statusEl.style.display = "block";
+        announce(statusEl.textContent);
         updateSubmitEnabled();
       });
   });

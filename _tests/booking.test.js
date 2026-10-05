@@ -53,8 +53,8 @@ function serve(dir) {
 
 // Opens a page with the booking system faked. The first request for times
 // fails, to check the Try again button. Bookings get the queued replies.
-async function openPage(browser, url) {
-  const context = await browser.newContext();
+async function openPage(browser, url, contextOptions) {
+  const context = await browser.newContext(contextOptions);
   await context.addInitScript(() => {
     try { localStorage.setItem("ecCookieConsent", JSON.stringify({ v: "denied", t: Date.now() })); } catch (e) {}
   });
@@ -173,6 +173,87 @@ async function bookingPage(browser, base, file) {
   await context.close();
 }
 
+// Keyboard and screen reader behaviour (FRE-196).
+async function accessibility(browser, base, file) {
+  const agents = file === "agents.html";
+  console.log("\n== " + file + " (accessibility)");
+  const { page, fake, context } = await openPage(browser, base + file);
+  const spoken = () => page.evaluate(() => {
+    const el = document.querySelector('body > div[aria-live="polite"]');
+    return el ? el.textContent : null;
+  });
+  const waitToHear = (text) => page.waitForFunction((t) => {
+    const el = document.querySelector('body > div[aria-live="polite"]');
+    return el && el.textContent.includes(t);
+  }, text, { timeout: 3000 }).then(() => true, () => false);
+  const focused = () => page.evaluate(() => {
+    const el = document.activeElement;
+    return { id: el.id, cls: el.className, day: el.getAttribute("data-day"), pressed: el.getAttribute("aria-pressed") };
+  });
+
+  check("page language is en-GB", (await page.getAttribute("html", "lang")) === "en-GB");
+  await page.keyboard.press("Tab");
+  check("first Tab reaches the skip link", (await page.evaluate(() => document.activeElement.getAttribute("href"))) === "#main" && (await page.$("main#main")) !== null);
+
+  const toggle = "#carpet-cleaning h3 > button.item-group-toggle";
+  const hasToggle = (await page.$(toggle)) !== null;
+  check("group headings are real buttons inside headings", hasToggle);
+  if (hasToggle) {
+    await page.focus(toggle);
+    await page.keyboard.press("Enter");
+    check("group heading button collapses from the keyboard", (await page.getAttribute(toggle, "aria-expanded")) === "false");
+    await page.keyboard.press("Space");
+    check("and opens again", (await page.getAttribute(toggle, "aria-expanded")) === "true");
+  }
+
+  await page.click('#group-rooms .item-row:nth-child(1) button[data-action="inc"]');
+  check("basket change is read out", await waitToHear("Small room: 1. Total £35."), await spoken());
+
+  await page.click("#bf-slots-retry");
+  await page.waitForSelector(".bf-day-card");
+  await page.focus('.bf-day-card[data-day="Tue 6 Oct"]');
+  await page.keyboard.press("Enter");
+  const day = await focused();
+  check("picking a day keeps focus on that day", day.day === "Tue 6 Oct" && day.pressed === "true", day);
+  await page.focus(".bf-slot-btn >> nth=0");
+  await page.keyboard.press("Enter");
+  const time = await focused();
+  check("picking a time keeps focus on that time", time.cls.includes("bf-slot-btn") && time.pressed === "true", time);
+
+  const legends = await page.$$eval("fieldset > legend", (els) => els.map((e) => e.textContent.trim()));
+  const expected = agents ? ["Access on the day", "Choose a time"] : ["How would you like to pay?", "Choose a time"];
+  check("choice groups have a fieldset and legend", JSON.stringify(legends) === JSON.stringify(expected), legends);
+
+  await page.fill("#bf-name", "Test Person");
+  if (agents) await page.fill("#bf-business", "Acme Lettings");
+  await page.fill("#bf-phone", "07000 000000");
+  await page.fill("#bf-email", "test@example.com");
+  await page.fill("#bf-address", "1 High Street");
+  if (agents) await page.check('input[name="bf-access"][value="arrange"]');
+  await page.fill("#bf-postcode", "SW1A 1AA");
+  check("out-of-area note is read out", await waitToHear("We don’t take online bookings"), await spoken());
+  await page.fill("#bf-postcode", "BA1 1AA");
+
+  fake.replies.push({ ok: false, error: "something_else" });
+  await page.click("#bf-submit");
+  check("a failed booking is read out", await waitToHear("Something went wrong"), await spoken());
+  fake.replies.push({ ok: true, reference: "EC-TEST2" });
+  await page.click("#bf-submit");
+  await page.waitForSelector("#booking-confirmed .ref");
+  check("focus moves to the confirmation", (await focused()).id === "booking-confirmed");
+  check("no JavaScript errors", fake.errors.length === 0, fake.errors);
+  await context.close();
+
+  // With "reduce motion" on, the scripted scrolling jumps instead of gliding.
+  const still = await openPage(browser, base + file, { reducedMotion: "reduce", viewport: { width: 1280, height: 800 } });
+  await still.page.click("header .book-link");
+  const y1 = await still.page.evaluate(() => window.scrollY);
+  await still.page.waitForTimeout(600);
+  const y2 = await still.page.evaluate(() => window.scrollY);
+  check("reduced motion: Book online jumps straight to the prices", y1 > 0 && y1 === y2, [y1, y2]);
+  await still.context.close();
+}
+
 (async () => {
   if (!fs.existsSync(path.join(siteDir, "index.html"))) {
     console.error("No built site at " + siteDir + ". Run `jekyll build` first.");
@@ -184,6 +265,8 @@ async function bookingPage(browser, base, file) {
   try {
     await bookingPage(browser, base, "index.html");
     await bookingPage(browser, base, "agents.html");
+    await accessibility(browser, base, "index.html");
+    await accessibility(browser, base, "agents.html");
   } finally {
     await browser.close();
     server.close();
