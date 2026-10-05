@@ -332,7 +332,7 @@ window.ecBooking = function (config) {
     var navEl = document.getElementById("bf-days-nav");
     if (!slotsCache.length) {
       navEl.style.display = "none";
-      daysEl.innerHTML = '<div class="bf-slots-empty">No online slots in the next couple of weeks. WhatsApp us and we’ll find you a time.</div>';
+      daysEl.innerHTML = '<div class="bf-slots-empty">No online slots available at the moment. WhatsApp us and we’ll find you a time.</div>';
       document.getElementById("bf-slots-label").textContent = "";
       document.getElementById("bf-slots").innerHTML = "";
       return;
