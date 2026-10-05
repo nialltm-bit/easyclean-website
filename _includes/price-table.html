@@ -1,0 +1,16 @@
+{%- comment -%}
+  Price table for the service pages, from _data/prices.yml.
+  Use: {% include price-table.html groups="sofas" %} (several: groups="rooms,rugs").
+  Deliberately not class="item-row": the booking system reads those rows only
+  from index.html and agents.html.
+{%- endcomment -%}
+{%- assign groups = include.groups | split: "," -%}
+<table class="price-table">
+  <thead><tr><th scope="col">Item</th><th scope="col" class="price">Price</th></tr></thead>
+  <tbody>
+{%- for p in site.data.prices %}{% if groups contains p.group %}
+    <tr><td>{{ p.shown_as | default: p.item | escape }}{% if p.meta != "" %}<span class="meta">{{ p.meta | escape }}</span>{% endif %}</td><td class="price">£{{ p.price }}</td></tr>
+{%- endif %}{% endfor %}
+  </tbody>
+</table>
+<p class="small-note">Fixed prices. No VAT to add.</p>

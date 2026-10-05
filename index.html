@@ -14,19 +14,19 @@ layout: null
 <script src="consent.js" defer></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EasyClean Somerset | Carpet, Upholstery &amp; Mattress Cleaning</title>
+<title>Carpet &amp; Sofa Cleaning in Bath, Bristol &amp; Mid Somerset | EasyClean Somerset</title>
 <meta name="description" content="Fixed-price carpet, upholstery &amp; mattress cleaning across Bath, Bristol &amp; mid Somerset. See your price and book your slot online in 60 seconds — no home visit needed.">
 <link rel="canonical" href="https://easycleansomerset.co.uk/">
 
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://easycleansomerset.co.uk/">
-<meta property="og:title" content="EasyClean Somerset | Carpet, Upholstery &amp; Mattress Cleaning">
+<meta property="og:title" content="Carpet &amp; Sofa Cleaning in Bath, Bristol &amp; Mid Somerset | EasyClean Somerset">
 <meta property="og:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning across Bath, Bristol &amp; mid Somerset. See your price and book your slot online in 60 seconds.">
 <meta property="og:image" content="https://easycleansomerset.co.uk/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="EasyClean Somerset | Carpet, Upholstery &amp; Mattress Cleaning">
+<meta name="twitter:title" content="Carpet &amp; Sofa Cleaning in Bath, Bristol &amp; Mid Somerset | EasyClean Somerset">
 <meta name="twitter:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning across Bath, Bristol &amp; mid Somerset. Book your slot online in 60 seconds.">
 <meta name="twitter:image" content="https://easycleansomerset.co.uk/og-image.png">
 
@@ -38,37 +38,7 @@ layout: null
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "LocalBusiness",
-  "name": "EasyClean Somerset",
-  "description": "Fixed-price carpet, upholstery and mattress cleaning across Somerset, Bath & Bristol. Instant online booking, no home visit needed.",
-  "url": "https://easycleansomerset.co.uk/",
-  "telephone": "+447873212249",
-  "email": "easycleansomerset@gmail.com",
-  "image": "https://easycleansomerset.co.uk/og-image.png",
-  "priceRange": "££",
-  "areaServed": [
-    "Somerset", "Bath and North East Somerset", "Bristol",
-    "Midsomer Norton", "Radstock", "Frome", "Bath", "Keynsham",
-    "Wells", "Shepton Mallet", "Glastonbury", "Street", "Cheddar",
-    "Paulton", "Timsbury", "Peasedown St John"
-  ],
-  "sameAs": [
-    "https://uk.trustpilot.com/review/easycleansomerset.co.uk"
-  ],
-  "hasOfferCatalog": {
-    "@type": "OfferCatalog",
-    "name": "Carpet, upholstery, mattress and rug cleaning",
-    "itemListElement": [
-      {%- for p in site.data.prices %}
-      { "@type": "Offer", "price": "{{ p.price }}", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": {{ p.google_name | jsonify }} } }{% unless forloop.last %},{% endunless %}
-      {%- endfor %}
-    ]
-  }
-}
-</script>
+{% include business-schema.html offers=true %}
 <style>
   /* ============ TOKENS ============ */
   :root {
@@ -300,6 +270,7 @@ layout: null
      header, so the hero CTA stays above the fold on a 375x667 phone. */
   @media (max-width: 480px) { .hero { padding: 18px 0 40px; } }
   .hero h1 { font-size: clamp(40px, 6.4vw, 78px); }
+  .hero h1 .eyebrow { line-height: 1.6; text-wrap: wrap; }
   .hero h1 em {
     font-style: normal;
     color: var(--teal);
@@ -838,14 +809,13 @@ layout: null
   .hours-grid {
     margin-top: 34px;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 1px;
     background: var(--line);
     border: 1px solid var(--line);
     border-radius: 4px;
     overflow: hidden;
   }
-  @media (max-width: 700px) { .hours-grid { grid-template-columns: repeat(2, 1fr); } }
   .hours-cell { background: var(--surface); padding: 16px; }
   .hours-cell .d { font-family: "Public Sans", sans-serif; font-weight: 600; font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--slate); }
   .hours-cell .t { font-weight: 700; margin-top: 4px; font-size: 15px; }
@@ -982,8 +952,7 @@ layout: null
   <!-- ============ HERO ============ -->
   <section class="hero">
     <div class="wrap hero-grid">
-      <div class="eyebrow">Bath, Bristol &amp; mid Somerset · Carpet, upholstery &amp; mattress cleaning</div>
-      <h1>Click.<br>Book.<br><em>Clean.</em></h1>
+      <h1><span class="eyebrow">Bath, Bristol &amp; mid Somerset · Carpet, upholstery &amp; mattress cleaning</span>Click.<br>Book.<br><em>Clean.</em></h1>
       <ul class="hero-list">
         <li>Fixed price, see it before you book</li>
         <li>Book your slot online in 60 seconds, no home visit needed</li>
@@ -1242,33 +1211,15 @@ layout: null
       <div class="eyebrow">Where &amp; when</div>
       <h2 style="text-transform:none; font-size:clamp(28px,3.6vw,40px); font-weight:700;">Bath, Bristol &amp; mid Somerset, six days a week.</h2>
       <div class="area-list">
-        <span class="area-chip">Midsomer Norton</span>
-        <span class="area-chip">Radstock</span>
-        <span class="area-chip">Paulton</span>
-        <span class="area-chip">Peasedown St John</span>
-        <span class="area-chip">Timsbury</span>
-        <span class="area-chip">Bath</span>
-        <span class="area-chip">Keynsham</span>
-        <span class="area-chip">Chew Magna</span>
-        <span class="area-chip">Frome</span>
-        <span class="area-chip">Shepton Mallet</span>
-        <span class="area-chip">Wells</span>
-        <span class="area-chip">Glastonbury</span>
-        <span class="area-chip">Street</span>
-        <span class="area-chip">Cheddar</span>
-        <span class="area-chip">Wedmore</span>
-        <span class="area-chip">Castle Cary</span>
-        <span class="area-chip">Bruton</span>
-        <span class="area-chip">Bristol</span>
-        <span class="area-chip">Long Ashton</span>
-        <span class="area-chip">Kingswood</span>
+{%- for t in site.data.business.towns %}
+        <span class="area-chip">{{ t }}</span>
+{%- endfor %}
       </div>
       <p class="area-note">In Bristol we cover the centre, south and east. Not sure? Type your postcode when you book, or WhatsApp us.</p>
       <div class="hours-grid">
-        <div class="hours-cell"><div class="d">Mon–Fri</div><div class="t">Early &amp; evening slots</div></div>
-        <div class="hours-cell"><div class="d">Saturday</div><div class="t">Full day</div></div>
-        <div class="hours-cell"><div class="d">Sunday</div><div class="t">By arrangement</div></div>
-        <div class="hours-cell"><div class="d">Bank holidays</div><div class="t">By arrangement</div></div>
+{%- for h in site.data.business.hours %}
+        <div class="hours-cell"><div class="d">{{ h.days }}</div><div class="t">{{ h.time }}</div></div>
+{%- endfor %}
       </div>
     </div>
   </section>
@@ -1319,6 +1270,9 @@ layout: null
         <p><a href="#book" class="book-link">Book online</a></p>
         <p><a id="foot-wa" href="#" target="_blank" rel="noopener">WhatsApp Quick Quote</a></p>
         <p><a href="faq.html">FAQs</a></p>
+        <p><a href="end-of-tenancy-cleaning.html">End-of-tenancy cleaning</a></p>
+        <p><a href="sofa-cleaning.html">Sofa cleaning</a></p>
+        <p><a href="mattress-cleaning.html">Mattress cleaning</a></p>
       </div>
       <div>
         <h2>Contact</h2>
