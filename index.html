@@ -15,19 +15,19 @@ layout: null
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EasyClean Somerset | Carpet, Upholstery &amp; Mattress Cleaning</title>
-<meta name="description" content="Fixed-price carpet, upholstery &amp; mattress cleaning across Somerset, Bath &amp; Bristol. See your price and book your slot online in 60 seconds — no home visit needed.">
+<meta name="description" content="Fixed-price carpet, upholstery &amp; mattress cleaning across Bath, Bristol &amp; mid Somerset. See your price and book your slot online in 60 seconds — no home visit needed.">
 <link rel="canonical" href="https://easycleansomerset.co.uk/">
 
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://easycleansomerset.co.uk/">
 <meta property="og:title" content="EasyClean Somerset | Carpet, Upholstery &amp; Mattress Cleaning">
-<meta property="og:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning across Somerset, Bath &amp; Bristol. See your price and book your slot online in 60 seconds.">
+<meta property="og:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning across Bath, Bristol &amp; mid Somerset. See your price and book your slot online in 60 seconds.">
 <meta property="og:image" content="https://easycleansomerset.co.uk/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="EasyClean Somerset | Carpet, Upholstery &amp; Mattress Cleaning">
-<meta name="twitter:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning across Somerset, Bath &amp; Bristol. Book your slot online in 60 seconds.">
+<meta name="twitter:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning across Bath, Bristol &amp; mid Somerset. Book your slot online in 60 seconds.">
 <meta name="twitter:image" content="https://easycleansomerset.co.uk/og-image.png">
 
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
@@ -923,6 +923,12 @@ layout: null
     font-size: 12.5px;
     color: color-mix(in srgb, var(--on-ink) 65%, transparent);
   }
+  /* ============ AREA AND VAT NOTES ============ */
+  .area-line { margin: 12px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink-soft); max-width: 75ch; }
+  .area-line:empty { display: none; }
+  .area-note { margin: 16px 0 0; font-size: 14.5px; color: var(--ink-soft); }
+  .summary-vat { margin-top: 6px; font-size: 12.5px; color: color-mix(in srgb, var(--on-ink) 65%, transparent); }
+
   /* ============ SKIP LINK ============ */
   /* The first thing a keyboard user reaches: jumps past the header to the
      page's main content. Off-screen until it has focus. */
@@ -976,7 +982,7 @@ layout: null
   <!-- ============ HERO ============ -->
   <section class="hero">
     <div class="wrap hero-grid">
-      <div class="eyebrow">Somerset, Bath &amp; Bristol · Carpet, upholstery &amp; mattress cleaning</div>
+      <div class="eyebrow">Bath, Bristol &amp; mid Somerset · Carpet, upholstery &amp; mattress cleaning</div>
       <h1>Click.<br>Book.<br><em>Clean.</em></h1>
       <ul class="hero-list">
         <li>Fixed price, see it before you book</li>
@@ -986,7 +992,7 @@ layout: null
       <div class="hero-ctas">
         <a href="#prices" class="btn btn-primary">Select your items</a>
       </div>
-      <div class="hero-note"><span class="dot"></span> Serving Midsomer Norton, Radstock, Frome, Bath, Bristol &amp; the Somerset villages</div>
+      <div class="hero-note"><span class="dot"></span> Serving Midsomer Norton, Radstock, Bath, Frome, Wells, Keynsham, Bristol &amp; nearby villages</div>
     </div>
   </section>
 
@@ -1051,6 +1057,7 @@ layout: null
     <div class="wrap">
       <div class="eyebrow">Select your items</div>
       <h2 style="text-transform:none; font-size:clamp(28px,3.6vw,40px); font-weight:700;">Select your items.</h2>
+      <p class="area-line" id="area-line"></p>
 
       <div class="calc-grid">
         <div>
@@ -1123,6 +1130,7 @@ layout: null
             <span class="lab">Total</span>
             <span class="amt mono" id="summary-total">£0</span>
           </div>
+          <div class="summary-vat">No VAT to add.</div>
           <div class="summary-time" id="summary-time" style="display:none;">
             <span class="lab">Est. job time</span>
             <span class="val" id="summary-time-val">-</span>
@@ -1232,17 +1240,30 @@ layout: null
   <section>
     <div class="wrap">
       <div class="eyebrow">Where &amp; when</div>
-      <h2 style="text-transform:none; font-size:clamp(28px,3.6vw,40px); font-weight:700;">Somerset, Bath &amp; Bristol, six days a week.</h2>
+      <h2 style="text-transform:none; font-size:clamp(28px,3.6vw,40px); font-weight:700;">Bath, Bristol &amp; mid Somerset, six days a week.</h2>
       <div class="area-list">
         <span class="area-chip">Midsomer Norton</span>
         <span class="area-chip">Radstock</span>
-        <span class="area-chip">Frome</span>
-        <span class="area-chip">Bath</span>
         <span class="area-chip">Paulton</span>
-        <span class="area-chip">Timsbury</span>
         <span class="area-chip">Peasedown St John</span>
-        <span class="area-chip">+ surrounding villages</span>
+        <span class="area-chip">Timsbury</span>
+        <span class="area-chip">Bath</span>
+        <span class="area-chip">Keynsham</span>
+        <span class="area-chip">Chew Magna</span>
+        <span class="area-chip">Frome</span>
+        <span class="area-chip">Shepton Mallet</span>
+        <span class="area-chip">Wells</span>
+        <span class="area-chip">Glastonbury</span>
+        <span class="area-chip">Street</span>
+        <span class="area-chip">Cheddar</span>
+        <span class="area-chip">Wedmore</span>
+        <span class="area-chip">Castle Cary</span>
+        <span class="area-chip">Bruton</span>
+        <span class="area-chip">Bristol</span>
+        <span class="area-chip">Long Ashton</span>
+        <span class="area-chip">Kingswood</span>
       </div>
+      <p class="area-note">In Bristol we cover the centre, south and east. Not sure? Type your postcode when you book, or WhatsApp us.</p>
       <div class="hours-grid">
         <div class="hours-cell"><div class="d">Mon–Fri</div><div class="t">Early &amp; evening slots</div></div>
         <div class="hours-cell"><div class="d">Saturday</div><div class="t">Full day</div></div>
@@ -1290,7 +1311,7 @@ layout: null
     <div class="foot-grid">
       <div>
         <div class="wordmark">Easy<span style="color:var(--teal-on-ink);">Clean</span> Somerset</div>
-        <p style="margin-top:14px; max-width:34ch;">Carpet, upholstery &amp; mattress cleaning across Somerset, Bath &amp; Bristol, fixed prices, booked online.</p>
+        <p style="margin-top:14px; max-width:34ch;">Carpet, upholstery &amp; mattress cleaning across Bath, Bristol &amp; mid Somerset, fixed prices, booked online.</p>
       </div>
       <div>
         <h2>Get a price</h2>
@@ -1307,7 +1328,7 @@ layout: null
       </div>
     </div>
     <div class="foot-bottom">
-      <span>© 2026 EasyClean Somerset. Sole trader.</span>
+      <span>© 2026 Niall Maher trading as EasyClean Somerset, Midsomer Norton. <a href="terms.html#business-details">Business details</a></span>
       <a href="privacy.html">Privacy &amp; cookies</a>
       <a href="#" data-cookie-settings>Cookie settings</a>
       <a href="terms.html">Terms &amp; Conditions</a>

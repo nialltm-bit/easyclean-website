@@ -37,6 +37,20 @@ window.ecBooking = function (config) {
   document.getElementById("wa-quick-quote").href = waLink(defaultMsg + "(I'll add photos here)");
   document.getElementById("foot-wa").href = waLink(defaultMsg);
 
+  // ---- Postcodes we cover, shown by the prices ----
+  // Read from service-area.js, so it always matches the postcode check.
+  var areaLine = document.getElementById("area-line");
+  if (areaLine && Array.isArray(window.EC_SERVICE_AREA)) {
+    var districts = window.EC_SERVICE_AREA.slice().sort(function (a, b) {
+      var pa = /^([A-Z]+)(\d+)$/.exec(a) || [a, a, 0];
+      var pb = /^([A-Z]+)(\d+)$/.exec(b) || [b, b, 0];
+      if (pa[1] !== pb[1]) return pa[1] < pb[1] ? -1 : 1;
+      return pa[2] - pb[2];
+    });
+    areaLine.textContent = "Online booking covers postcodes " + districts.join(", ") +
+      ". Somewhere else? WhatsApp us and we’ll see if we can help.";
+  }
+
   // ---- Job time estimate ----
   // A fixed 45-minute overhead (travel, set-up, colourfastness check,
   // pack-down) is added to every job with at least one item picked.
