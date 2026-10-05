@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-GB">
 <head>
 <!-- Analytics and Trustpilot only load after cookie consent: see consent.js.
      gtag() calls before then just queue and are never sent without consent. -->
@@ -364,11 +364,29 @@
     flex-wrap: wrap;
     gap: 10px;
     font-size: 12.5px;
-    color: color-mix(in srgb, var(--on-ink) 50%, transparent);
+    color: color-mix(in srgb, var(--on-ink) 65%, transparent);
   }
+  /* ============ SKIP LINK ============ */
+  /* The first thing a keyboard user reaches: jumps past the header to the
+     page's main content. Off-screen until it has focus. */
+  .skip-link {
+    position: absolute;
+    left: 12px;
+    top: -100px;
+    z-index: 200;
+    padding: 10px 16px;
+    border-radius: 4px;
+    background: var(--ink);
+    color: var(--on-ink);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .skip-link:focus { top: 12px; }
+  main:focus { outline: none; }
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to main content</a>
 
 <header class="site">
   <div class="navrow">
@@ -382,7 +400,7 @@
   </div>
 </header>
 
-<main>
+<main id="main" tabindex="-1">
   <div class="wrap tc-hero">
     <div class="eyebrow">Questions</div>
     <h1>Frequently Asked Questions</h1>
