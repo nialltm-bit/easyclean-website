@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<base target="_top">
+<meta charset="UTF-8">
+<meta name="robots" content="noindex, nofollow">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=Public+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Dashboard.html: lives in the Apps Script project as the "Dashboard" file.
+     NOT the website's admin.html launcher page.
+     Private admin app for Niall: served by Apps Script only to the Google
+     account that owns the script. Same colour tokens as the website. */
+  :root {
+    --ink: #12232B; --ink-soft: #2A3D46; --paper: #F5F7F6; --surface: #FFFFFF;
+    --teal: #0E7C86; --teal-deep: #0A5960; --teal-tint: #E4F0F0; --slate: #5C6F73;
+    --line: #DCE3E2; --stamp: #B5461E; --stamp-tint: #F9E6DF; --on-ink: #F5F7F6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #E9EEEC; --ink-soft: #C4D0CD; --paper: #0D1A1F; --surface: #15262C;
+      --teal: #3FB8C4; --teal-deep: #6ED2DB; --teal-tint: #143137; --slate: #8FA3A2;
+      --line: #24383E; --stamp: #E58256; --stamp-tint: #3A2219; --on-ink: #0D1A1F;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: "Public Sans", Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 16px 16px 56px; }
+  header.top { display: flex; align-items: center; gap: 10px; padding: 4px 0 16px; }
+  header.top img { width: 30px; height: 30px; display: block; }
+  header.top .word { font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 19px; text-transform: uppercase; }
+  header.top .word span { color: var(--teal); }
+  header.top .tag { margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--slate); }
+  h1 { font-family: "Big Shoulders Display", sans-serif; font-size: 26px; font-weight: 800; margin: 0 0 14px; }
+  h2 { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--slate); margin: 22px 0 8px; }
+  .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+  .tab { flex: 1; background: var(--surface); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 12px; font-weight: 700; font-size: 15px; cursor: pointer; font-family: inherit; }
+  .tab.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .count { display: inline-block; min-width: 20px; padding: 1px 6px; margin-left: 6px; border-radius: 10px; background: var(--stamp); color: var(--on-ink); font-size: 12px; }
+  .search { display: flex; gap: 8px; }
+  input[type=text], input[type=search], input[type=date], input[type=time] { width: 100%; font-family: inherit; font-size: 15px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; }
+  button.card.job { display: block; width: 100%; text-align: left; font-family: inherit; color: inherit; cursor: pointer; }
+  .job .when { font-size: 12.5px; font-weight: 700; color: var(--teal-deep); margin-bottom: 3px; }
+  .job .name { font-weight: 700; font-size: 16px; }
+  .job .sub { font-size: 13.5px; color: var(--slate); margin-top: 2px; line-height: 1.4; }
+  .job .meta { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 14px; font-weight: 700; gap: 8px; }
+  .pill { display: inline-block; padding: 3px 9px; border-radius: 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+  .pill.due { background: var(--teal-tint); color: var(--teal-deep); }
+  .pill.late { background: var(--stamp-tint); color: var(--stamp); }
+  .pill.done { background: var(--teal-tint); color: var(--teal-deep); }
+  .empty { font-size: 14px; color: var(--slate); padding: 4px 0 8px; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+  .row:last-child { border-bottom: none; }
+  .row .label { color: var(--slate); font-weight: 600; flex-shrink: 0; }
+  .row .value { text-align: right; font-weight: 600; word-break: break-word; }
+  .btn { display: block; width: 100%; text-align: center; text-decoration: none; font-family: inherit; font-weight: 700; font-size: 15px; border-radius: 6px; padding: 13px 16px; cursor: pointer; border: 1px solid transparent; }
+  .btn-primary { background: var(--stamp); color: var(--on-ink); }
+  .btn-primary[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .btn-ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+  .btn-row { display: flex; gap: 8px; margin-top: 10px; }
+  .btn-row .btn { flex: 1; padding: 11px 10px; font-size: 14px; }
+  .btn-link { background: none; border: none; padding: 6px 0; font-family: inherit; font-size: 14px; font-weight: 600; color: var(--slate); text-decoration: underline; cursor: pointer; }
+  .back { margin-bottom: 8px; }
+  .panel { display: none; margin-top: 10px; }
+  .panel.open { display: block; }
+  .check { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 10px 0; }
+  .check input { width: 18px; height: 18px; }
+  .note { font-size: 13.5px; color: var(--slate); margin: 8px 0 0; line-height: 1.5; }
+  .note.bad { color: var(--stamp); font-weight: 600; }
+  .pad-label { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--slate); margin-bottom: 8px; }
+  canvas#pad { width: 100%; height: 220px; display: block; background: var(--surface); border: 1px dashed var(--line); border-radius: 6px; touch-action: none; }
+  .loading { font-size: 14.5px; color: var(--slate); padding: 20px 0; }
+  .paid-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .paid-row:last-child { border-bottom: none; }
+  .pill.cancelled { background: var(--stamp-tint); color: var(--stamp); }
+  .btn-danger { background: transparent; color: var(--stamp); border-color: var(--stamp); }
+  .btn-danger[disabled] { opacity: 0.4; cursor: not-allowed; }
+  .radio { display: flex; align-items: flex-start; gap: 10px; font-size: 14.5px; padding: 8px 0; cursor: pointer; }
+  .radio input { width: 18px; height: 18px; margin: 1px 0 0; flex-shrink: 0; }
+  .feebox { margin-top: 6px; padding: 10px 12px; border-radius: 6px; background: var(--stamp-tint); }
+  .feebox .check { margin: 0; }
+  .two { display: flex; gap: 8px; }
+  .two > div { flex: 1; min-width: 0; }
+  .block-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+  .block-row:last-child { border-bottom: none; }
+  .seg { display: flex; gap: 6px; margin-bottom: 12px; }
+  .seg label { flex: 1; text-align: center; padding: 10px 6px; border: 1px solid var(--line); border-radius: 6px; font-weight: 700; font-size: 14px; cursor: pointer; background: var(--surface); }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg label.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .field { margin-bottom: 10px; }
+  .field .pad-label { display: block; margin-bottom: 5px; }
+  select { width: 100%; font-family: inherit; font-size: 15px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+  input[type=number], input[type=email], input[type=tel] { width: 100%; font-family: inherit; font-size: 15px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink); }
+  .line-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto 30px; gap: 8px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+  .line-row .sub { display: block; font-size: 12.5px; color: var(--slate); }
+  .mini-step { display: flex; align-items: center; border: 1px solid var(--line); border-radius: 6px; }
+  .mini-step button { width: 34px; height: 34px; border: none; background: none; color: var(--ink); font-size: 18px; font-weight: 700; cursor: pointer; }
+  .mini-step span { min-width: 20px; text-align: center; font-weight: 700; }
+  .line-amt { font-weight: 700; text-align: right; min-width: 52px; }
+  .x { width: 30px; height: 30px; border: none; background: none; color: var(--slate); font-size: 20px; cursor: pointer; }
+  .totals { display: flex; justify-content: space-between; font-weight: 700; padding: 10px 0 2px; font-size: 15px; }
+  .confirm-box { margin-top: 10px; padding: 12px; border-radius: 6px; background: var(--stamp-tint); font-size: 14px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <img src="https://easycleansomerset.co.uk/apple-touch-icon.png" alt="">
+    <div class="word">Easy<span>Clean</span> Somerset</div>
+    <div class="tag">Admin</div>
+  </header>
+  <div id="app"><p class="loading">Loading&hellip;</p></div>
+</div>
+
+<script>
+  var INIT = <?!= initJson ?>;
+  var state = { tab: "jobs", overview: null };
+
+  // google.script.run as a promise. Every server function re-checks that
+  // this is the script owner, so nothing here is trusted on its own.
+  function call(fn) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    return new Promise(function (resolve, reject) {
+      // A null response means the server sent something the page can't
+      // receive; show that plainly rather than crashing on it.
+      var runner = google.script.run
+        .withSuccessHandler(function (r) { resolve(r == null ? { ok: false, error: "The server sent back an empty response." } : r); })
+        .withFailureHandler(reject);
+      runner[fn].apply(runner, args);
+    });
+  }
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function $(id) { return document.getElementById(id); }
+  function app(html) { $("app").innerHTML = html; }
+  function todayIso() {
+    var d = new Date();
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function failed(err) {
+    app('<div class="card"><p class="note bad" style="margin:0;">Something went wrong: ' + esc(err && err.message || err) + '</p></div>' +
+        '<button class="btn btn-ghost" onclick="loadHome()">Back to start</button>');
+  }
+
+  // ---------- Home: jobs + unpaid ----------
+  function loadHome() {
+    app('<p class="loading">Loading&hellip;</p>');
+    call("adminGetOverview").then(function (o) {
+      if (!o.ok) return failed(o.error);
+      state.overview = o;
+      renderHome();
+    }).catch(failed);
+  }
+
+  function jobCard(j) {
+    return '<button class="card job" onclick="openJob(\'' + esc(j.token) + '\')">' +
+      '<div class="when">' + esc(j.when) + ' &middot; ' + esc(j.reference) + '</div>' +
+      '<div class="name">' + esc(j.name) + '</div>' +
+      '<div class="sub">' + esc(j.address) + '</div>' +
+      '<div class="meta"><span>' + esc(j.total) + '</span>' +
+        (j.cancelled ? '<span class="pill cancelled">Cancelled</span>' :
+         /^Agent arranging/.test(j.access || "") ? '<span class="pill due">Agent arranging access</span>'
+          : '<span class="sub" style="margin:0;">' + esc(j.channel === "Agent/Landlord" ? "Agent" : "Homeowner") + '</span>') +
+      '</div>' +
+    '</button>';
+  }
+
+  function section(title, list, emptyText) {
+    return '<h2>' + title + '</h2>' + (list.length ? list.map(jobCard).join("") : '<p class="empty">' + emptyText + '</p>');
+  }
+
+  function unpaidCard(j) {
+    var badge = j.daysOverdue > 0
+      ? '<span class="pill late">' + j.daysOverdue + (j.daysOverdue === 1 ? " day" : " days") + ' overdue</span>'
+      : '<span class="pill due">Due ' + esc(j.paymentDue) + '</span>';
+    return '<div class="card job" id="u-' + esc(j.token) + '">' +
+      '<div class="when">' + esc(j.invoiceNo) + ' &middot; ' + esc(j.reference) + '</div>' +
+      '<div class="name">' + esc(j.name) + '</div>' +
+      '<div class="sub">' + esc(j.address) + '</div>' +
+      '<div class="meta"><span>' + esc(j.total) + '</span>' + badge + '</div>' +
+      (j.cancelled ? '<div class="sub">Cancellation fee</div>' : '') +
+      '<div class="sub" id="rm-' + esc(j.token) + '">' + (j.remindedOn ? 'Reminder sent ' + esc(j.remindedOn) : '') + '</div>' +
+      '<div class="btn-row">' +
+        (j.invoiceUrl ? '<a class="btn btn-ghost" href="' + esc(j.invoiceUrl) + '" target="_blank" rel="noopener">View invoice</a>' : '') +
+        '<button class="btn btn-primary" onclick="togglePaid(\'' + esc(j.token) + '\')">Mark paid</button>' +
+      '</div>' +
+      (j.daysOverdue > 0 && j.hasEmail
+        ? '<div style="text-align:center;margin-top:6px;"><button class="btn-link" id="rb-' + esc(j.token) + '" onclick="sendReminder(\'' + esc(j.token) + '\')">' + (j.remindedOn ? 'Send another reminder' : 'Email them a payment reminder') + '</button></div>'
+        : '') +
+      '<div class="panel" id="p-' + esc(j.token) + '">' +
+        '<label class="pad-label" for="d-' + esc(j.token) + '">Date paid</label>' +
+        '<input type="date" id="d-' + esc(j.token) + '" value="' + todayIso() + '">' +
+        '<label class="check"><input type="checkbox" id="r-' + esc(j.token) + '"' + (j.hasEmail ? ' checked' : ' disabled') + '> Email them a payment receipt</label>' +
+        '<button class="btn btn-primary" id="c-' + esc(j.token) + '" onclick="confirmPaid(\'' + esc(j.token) + '\')">Confirm paid</button>' +
+        '<p class="note" id="m-' + esc(j.token) + '"></p>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderHome() {
+    var o = state.overview;
+    var tabs = '<div class="tabs">' +
+      '<button class="tab' + (state.tab === "jobs" ? " on" : "") + '" onclick="setTab(\'jobs\')">Jobs</button>' +
+      '<button class="tab' + (state.tab === "unpaid" ? " on" : "") + '" onclick="setTab(\'unpaid\')">Unpaid' + (o.unpaid.length ? '<span class="count">' + o.unpaid.length + '</span>' : '') + '</button>' +
+      '<button class="tab' + (state.tab === "timeoff" ? " on" : "") + '" onclick="setTab(\'timeoff\')">Time off</button>' +
+    '</div>';
+    if (state.tab === "timeoff") { app(tabs + timeOffHtml()); loadBlocks(); return; }
+    var body;
+    if (state.tab === "jobs") {
+      body = '<button class="btn btn-primary" style="margin-bottom:12px;" onclick="newBooking()">+ New booking</button>' +
+        '<div class="search"><input type="search" id="q" placeholder="EC- reference, name or address" onkeydown="if(event.key===\'Enter\')runSearch()"><button class="btn btn-ghost" style="width:auto;" onclick="runSearch()">Find</button></div>' +
+        '<div id="results"></div>' +
+        section("Today", o.today, "Nothing booked today.") +
+        section("Waiting for sign-off", o.waiting, "Nothing waiting.") +
+        section("Coming up", o.upcoming, "Nothing in the next 30 days.");
+    } else {
+      body = '<h2>Unpaid invoices</h2>' +
+        (o.unpaid.length ? o.unpaid.map(unpaidCard).join("") : '<p class="empty">Nothing outstanding.</p>') +
+        '<h2>Paid in the last 30 days</h2>' +
+        (o.recentlyPaid.length
+          ? '<div class="card">' + o.recentlyPaid.map(function (j) {
+              return '<div class="paid-row"><span><strong>' + esc(j.invoiceNo) + '</strong> ' + esc(j.name) + '<br><span class="sub">' + esc(j.total) + ', paid ' + esc(j.paidOn) + '</span></span>' +
+                '<button class="btn-link" onclick="undoPaid(\'' + esc(j.token) + '\')">Undo</button></div>';
+            }).join("") + '</div>'
+          : '<p class="empty">None yet.</p>');
+    }
+    app(tabs + body);
+  }
+
+  function setTab(t) { state.tab = t; renderHome(); }
+
+
+  // ---------- Add a booking yourself / edit a job ----------
+  // For phone, WhatsApp and Quick Quote jobs, price matches, extra items on
+  // the day, moving a job and £0 re-cleans. The server checks everything again.
+  var bk = null; // the booking being added or edited (not called "form": inline handlers would see the element's own .form)
+  var priceLists = {};
+  var PAYMENTS = { "Consumer": ["Cash", "Bank transfer", "No charge"], "Agent/Landlord": ["Invoice, 14 days", "Cash", "No charge"] };
+
+  function newBooking() {
+    bk = { mode: "new", channel: "Consumer", name: "", phone: "", email: "", address: "", postcode: "",
+      businessName: "", agencyId: "", accessArrange: false, siteContactName: "", siteContactPhone: "",
+      referralCode: "", notes: "", payment: "Cash", lines: [], date: todayIso(), time: "10:00",
+      lengthMins: 150, lengthTouched: false, emailCustomer: true, changeReason: "" };
+    renderForm();
+  }
+
+  function openEdit(token) {
+    app('<p class="loading">Loading job&hellip;</p>');
+    call("adminGetJobForEdit", token).then(function (j) {
+      if (!j.ok) return failed(j.error === "not_found" ? "Couldn't find that job." : j.error);
+      if (j.completed || j.cancelled) return failed(j.completed ? "This job is already signed off, so it can't be changed." : "This booking is cancelled.");
+      bk = j;
+      bk.mode = "edit"; bk.postcode = ""; bk.lengthTouched = true; bk.emailCustomer = !!j.email; bk.changeReason = "";
+      if (!bk.date) { bk.date = todayIso(); bk.time = "10:00"; }
+      renderForm();
+    }).catch(failed);
+  }
+
+  function setF(k, v) {
+    bk[k] = v;
+    if (k === "email") { var cb = $("f-emailcust"), has = !!v.trim(); cb.disabled = !has; cb.checked = has && bk.emailCustomer; }
+  }
+
+  function money(n) {
+    var neg = n < 0, a = Math.abs(Math.round(n * 100) / 100);
+    return (neg ? "-£" : "£") + (a % 1 ? a.toFixed(2) : String(a));
+  }
+  function minsText(m) { var h = Math.floor(m / 60), r = m % 60; return h ? (r ? h + "h " + r + "m" : h + "h") : r + " min"; }
+
+  function field(label, id, key, type, extra) {
+    return '<div class="field"><label class="pad-label" for="' + id + '">' + label + '</label>' +
+      '<input type="' + (type || "text") + '" id="' + id + '" value="' + esc(bk[key]) + '" oninput="setF(\'' + key + '\', this.value)"' + (extra || "") + '></div>';
+  }
+
+  function renderForm() {
+    var isNew = bk.mode === "new", agent = bk.channel === "Agent/Landlord";
+    var lengthOpts = "";
+    for (var m = 30; m <= 720; m += 30) lengthOpts += '<option value="' + m + '"' + (m === bk.lengthMins ? " selected" : "") + '>' + minsText(m) + '</option>';
+    app('<button class="btn-link back" onclick="' + (isNew ? 'loadHome()' : 'openJob(\'' + esc(bk.token) + '\')') + '">&lsaquo; ' + (isNew ? 'Back' : 'Back to job') + '</button>' +
+      '<h1>' + (isNew ? 'New booking' : 'Edit ' + esc(bk.reference)) + '</h1>' +
+      '<div class="card">' +
+        '<div class="seg" role="radiogroup">' +
+          '<label class="' + (!agent ? "on" : "") + '"><input type="radio" name="f-ch" ' + (!agent ? "checked" : "") + ' onchange="setChannel(\'Consumer\')">Homeowner</label>' +
+          '<label class="' + (agent ? "on" : "") + '"><input type="radio" name="f-ch" ' + (agent ? "checked" : "") + ' onchange="setChannel(\'Agent/Landlord\')">Landlord or agent</label>' +
+        '</div>' +
+        field(agent ? "Contact name" : "Name", "f-name", "name") +
+        '<div id="f-agent" class="' + (agent ? "" : "hidden") + '">' +
+          field("Agency or landlord name", "f-biz", "businessName") +
+          field("Their reference (optional)", "f-ref", "agencyId") +
+          '<div class="pad-label" style="margin-top:4px;">Access on the day</div>' +
+          '<label class="radio"><input type="radio" name="f-acc" ' + (!bk.accessArrange ? "checked" : "") + ' onchange="setAccess(false)"> Someone will be there</label>' +
+          '<label class="radio"><input type="radio" name="f-acc" ' + (bk.accessArrange ? "checked" : "") + ' onchange="setAccess(true)"> Agent arranging access</label>' +
+          '<div id="f-site" class="two ' + (bk.accessArrange ? "hidden" : "") + '"><div>' + field("Site contact", "f-sc", "siteContactName") + '</div><div>' + field("Their phone", "f-scp", "siteContactPhone", "tel") + '</div></div>' +
+        '</div>' +
+        '<div class="two"><div>' + field("Phone", "f-phone", "phone", "tel") + '</div><div>' + field("Email (optional)", "f-email", "email", "email") + '</div></div>' +
+        field("Address", "f-addr", "address") +
+        (isNew ? field("Postcode", "f-pc", "postcode") : "") +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="pad-label">What needs cleaning</div>' +
+        '<div id="f-lines"></div>' +
+        '<div class="totals"><span>Total</span><span id="f-total"></span></div>' +
+        '<p class="note" id="f-est" style="margin:0 0 10px;"></p>' +
+        '<div class="two"><div style="flex:3;"><select id="f-add" aria-label="Add an item from the price list"><option>Loading prices&hellip;</option></select></div>' +
+          '<div style="flex:1;"><button class="btn btn-ghost" style="padding:11px 6px;" onclick="addListItem()">Add</button></div></div>' +
+        '<p class="note" id="f-pricewarn"></p>' +
+        '<div style="display:flex;gap:14px;margin-top:6px;">' +
+          '<button class="btn-link" onclick="$(\'f-custom\').classList.toggle(\'hidden\')">+ Custom item</button>' +
+          '<button class="btn-link" onclick="$(\'f-adjust\').classList.toggle(\'hidden\')">+ Price change</button>' +
+        '</div>' +
+        '<div id="f-custom" class="hidden" style="margin-top:8px;">' +
+          '<div class="field"><label class="pad-label" for="c-desc">Description</label><input type="text" id="c-desc" placeholder="e.g. Wool rug (assessed)"></div>' +
+          '<div class="two"><div class="field"><label class="pad-label" for="c-price">Price £</label><input type="number" id="c-price" step="0.01" inputmode="decimal"></div>' +
+          '<div class="field"><label class="pad-label" for="c-mins">Minutes</label><input type="number" id="c-mins" step="5" inputmode="numeric" placeholder="30"></div></div>' +
+          '<button class="btn btn-ghost" onclick="addCustom()">Add custom item</button>' +
+        '</div>' +
+        '<div id="f-adjust" class="hidden" style="margin-top:8px;">' +
+          '<div class="two"><div class="field"><label class="pad-label" for="a-amt">Amount £ (minus for a discount)</label><input type="number" id="a-amt" step="0.01" inputmode="decimal" placeholder="-15"></div>' +
+          '<div class="field"><label class="pad-label" for="a-why">Reason</label><input type="text" id="a-why" placeholder="e.g. Beat My Quote"></div></div>' +
+          '<button class="btn btn-ghost" onclick="addAdjust()">Add price change</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="card">' +
+        '<div class="pad-label">When</div>' +
+        '<div class="two"><div>' + field("Date", "f-date", "date", "date") + '</div><div>' + field("Start", "f-time", "time", "time", ' step="900"') + '</div></div>' +
+        '<div class="field"><label class="pad-label" for="f-len">How long</label><select id="f-len" onchange="bk.lengthMins=parseInt(this.value,10);bk.lengthTouched=true;">' + lengthOpts + '</select></div>' +
+        '<div class="field"><label class="pad-label" for="f-pay">Payment</label><select id="f-pay" onchange="bk.payment=this.value"></select></div>' +
+        field("Notes (just for you, shows in your calendar)", "f-notes", "notes") +
+        (isNew ? "" : field("Reason for the change (optional)", "f-why", "changeReason")) +
+        '<label class="check"><input type="checkbox" id="f-emailcust" ' + (bk.emailCustomer && bk.email ? "checked " : "") + (bk.email ? "" : "disabled ") + 'onchange="bk.emailCustomer=this.checked"> ' +
+          (isNew ? "Email them a booking confirmation" : "Email them the updated details") + '</label>' +
+      '</div>' +
+      '<button class="btn btn-primary" id="f-save" onclick="saveForm(false)">' + (isNew ? "Book it" : "Save changes") + '</button>' +
+      '<div id="f-confirm"></div>' +
+      '<p class="note" id="f-msg"></p>');
+    renderPayments();
+    renderLines();
+    loadPriceList();
+  }
+
+  function setChannel(ch) {
+    bk.channel = ch;
+    var agent = ch === "Agent/Landlord";
+    document.querySelectorAll(".seg label").forEach(function (l, i) { l.classList.toggle("on", i === (agent ? 1 : 0)); });
+    $("f-agent").classList.toggle("hidden", !agent);
+    bk.payment = PAYMENTS[ch][0]; // invoice for agents, cash for homeowners
+    renderPayments();
+    loadPriceList();
+  }
+
+  function setAccess(arrange) { bk.accessArrange = arrange; $("f-site").classList.toggle("hidden", arrange); }
+
+  function renderPayments() {
+    var opts = PAYMENTS[bk.channel].slice();
+    if (bk.payment && opts.indexOf(bk.payment) === -1) opts.push(bk.payment);
+    $("f-pay").innerHTML = opts.map(function (o) { return '<option' + (o === bk.payment ? " selected" : "") + '>' + esc(o) + '</option>'; }).join("");
+    bk.payment = $("f-pay").value;
+  }
+
+  function loadPriceList() {
+    var ch = bk.channel;
+    var show = function (pl) {
+      if (!bk || bk.channel !== ch || !$("f-add")) return;
+      $("f-add").innerHTML = '<option value="">Add from price list&hellip;</option>' + pl.items.map(function (it, i) {
+        return '<option value="' + i + '">' + esc(it.item) + ' &middot; ' + money(it.price) + '</option>';
+      }).join("");
+      $("f-pricewarn").textContent = pl.warning || "";
+      // Lines loaded for editing pick up their times from the price list.
+      bk.lines.forEach(function (l) { if (!l.mins) pl.items.forEach(function (it) { if (it.item === l.desc) { l.mins = it.mins; l.fromList = true; } }); });
+      renderLines();
+    };
+    if (priceLists[ch]) return show(priceLists[ch]);
+    call("adminGetPriceList", ch).then(function (pl) { priceLists[ch] = pl; show(pl); })
+      .catch(function () { if ($("f-add")) $("f-add").innerHTML = '<option value="">Price list unavailable, use Custom item</option>'; });
+  }
+
+  function addListItem() {
+    var pl = priceLists[bk.channel], i = $("f-add").value;
+    if (!pl || i === "") return;
+    var it = pl.items[parseInt(i, 10)];
+    var existing = bk.lines.filter(function (l) { return l.desc === it.item && l.unit === it.price; })[0];
+    if (existing) existing.qty++;
+    else bk.lines.push({ desc: it.item, qty: 1, unit: it.price, mins: it.mins, fromList: true });
+    $("f-add").value = "";
+    renderLines();
+  }
+
+  function addCustom() {
+    var desc = $("c-desc").value.trim(), price = parseFloat($("c-price").value), mins = parseInt($("c-mins").value, 10) || 0;
+    if (!desc || isNaN(price)) { $("f-msg").className = "note bad"; $("f-msg").textContent = "A custom item needs a description and a price."; return; }
+    bk.lines.push({ desc: desc, qty: 1, unit: price, mins: mins });
+    $("c-desc").value = ""; $("c-price").value = ""; $("c-mins").value = "";
+    $("f-custom").classList.add("hidden"); $("f-msg").textContent = "";
+    renderLines();
+  }
+
+  function addAdjust() {
+    var amt = parseFloat($("a-amt").value), why = $("a-why").value.trim();
+    if (isNaN(amt) || amt === 0) { $("f-msg").className = "note bad"; $("f-msg").textContent = "Enter an amount, with a minus for a discount."; return; }
+    bk.lines.push({ desc: "Price change" + (why ? " (" + why + ")" : ""), qty: 1, unit: amt, mins: 0 });
+    $("a-amt").value = ""; $("a-why").value = "";
+    $("f-adjust").classList.add("hidden"); $("f-msg").textContent = "";
+    renderLines();
+  }
+
+  function lineQty(i, d) {
+    var l = bk.lines[i]; l.qty = Math.max(1, Math.min(50, l.qty + d)); renderLines();
+  }
+  function removeLine(i) { bk.lines.splice(i, 1); renderLines(); }
+
+  function renderLines() {
+    if (!$("f-lines")) return;
+    var total = 0, mins = 0;
+    $("f-lines").innerHTML = bk.lines.length ? bk.lines.map(function (l, i) {
+      total += l.qty * l.unit; mins += l.qty * (l.mins || 0);
+      return '<div class="line-row"><div>' + esc(l.desc) + '<span class="sub">' + money(l.unit) + (l.qty > 1 ? ' each' : '') + '</span></div>' +
+        (l.qty === 1 && /^Price change/.test(l.desc) ? '<div></div>' :
+          '<div class="mini-step"><button onclick="lineQty(' + i + ',-1)" aria-label="One fewer ' + esc(l.desc) + '">&minus;</button><span>' + l.qty + '</span><button onclick="lineQty(' + i + ',1)" aria-label="One more ' + esc(l.desc) + '">+</button></div>') +
+        '<div class="line-amt">' + money(l.qty * l.unit) + '</div>' +
+        '<button class="x" onclick="removeLine(' + i + ')" aria-label="Remove ' + esc(l.desc) + '">&times;</button></div>';
+    }).join("") : '<p class="empty">Nothing added yet.</p>';
+    var overhead = (priceLists[bk.channel] && priceLists[bk.channel].overheadMins) || 45;
+    var est = overhead + mins;
+    $("f-total").textContent = money(total);
+    $("f-est").textContent = bk.lines.length ? "Estimated time ~" + minsText(est) + (total < 0 ? ". The total can't be below £0." : "") : "";
+    if (!bk.lengthTouched && bk.lines.length) {
+      bk.lengthMins = Math.min(720, Math.max(60, Math.ceil(est / 30) * 30));
+      $("f-len").value = String(bk.lengthMins);
+    }
+  }
+
+  function saveForm(force) {
+    var b = $("f-save"), msg = $("f-msg");
+    msg.className = "note"; msg.textContent = ""; $("f-confirm").innerHTML = "";
+    b.disabled = true; b.textContent = "Saving…";
+    var payload = {};
+    ["channel", "name", "phone", "email", "address", "postcode", "businessName", "agencyId", "accessArrange", "siteContactName",
+      "siteContactPhone", "referralCode", "notes", "payment", "date", "time", "lengthMins", "emailCustomer", "changeReason"].forEach(function (k) { payload[k] = bk[k]; });
+    payload.emailCustomer = !!(bk.emailCustomer && bk.email);
+    payload.lines = bk.lines.map(function (l) { return { desc: l.desc, qty: l.qty, unit: l.unit, mins: l.mins || 0 }; });
+    payload.force = !!force;
+    var label = bk.mode === "new" ? "Book it" : "Save changes";
+    var req = bk.mode === "new" ? call("adminCreateBooking", payload) : call("adminUpdateJob", bk.token, payload);
+    req.then(function (r) {
+      b.disabled = false; b.textContent = label;
+      if (r.needsConfirm) {
+        $("f-confirm").innerHTML = '<div class="confirm-box">Already in your calendar at that time: <strong>' + esc(r.clashes.join(", ")) + '</strong>.' +
+          '<button class="btn btn-ghost" style="margin-top:8px;" onclick="saveForm(true)">' + (bk.mode === "new" ? "Book it anyway" : "Save anyway") + '</button></div>';
+        return;
+      }
+      if (!r.ok) { msg.className = "note bad"; msg.textContent = r.error; return; }
+      var mail = r.emailError ? " The email didn't send (" + r.emailError + ")." : (r.emailed ? " Email sent." : "");
+      if (bk.mode === "new") {
+        app('<div class="card"><p style="margin:0 0 6px;"><span class="pill done">Booked ' + esc(r.reference) + '</span></p>' +
+          '<p class="note" style="margin:0;">It&#8217;s in your calendar' + (bk.email ? ' and they&#8217;ll get the usual reminder emails.' : '. No email address, so no reminder emails.') + esc(mail) + '</p></div>' +
+          '<button class="btn btn-primary" style="margin-bottom:8px;" onclick="openJob(\'' + esc(r.token) + '\')">Open the job</button>' +
+          '<button class="btn btn-ghost" onclick="loadHome()">Back to all jobs</button>');
+      } else {
+        state.flash = "Saved" + (r.changes && r.changes.length ? ": " + r.changes.join(", ") : "") + "." + mail;
+        openJob(bk.token);
+      }
+    }).catch(function (err) {
+      b.disabled = false; b.textContent = label;
+      msg.className = "note bad"; msg.textContent = "Couldn't save: " + (err && err.message || err);
+    });
+  }
+
+  // ---------- Time off: block days or hours ----------
+  // Bank holidays, Christmas Day, Boxing Day and New Year's Day are already
+  // closed automatically. Blocks are calendar events, so they also show in
+  // your calendar.
+  function timeOffHtml() {
+    return '<div class="card">' +
+      '<div class="pad-label">Block a day or time</div>' +
+      '<p class="note" style="margin:0 0 10px;">Stops online bookings for that time. Bank holidays, Christmas, Boxing Day and New Year&#8217;s Day are already closed.</p>' +
+      '<label class="pad-label" for="bk-date">Date</label>' +
+      '<input type="date" id="bk-date" value="' + todayIso() + '">' +
+      '<label class="check"><input type="checkbox" id="bk-allday" checked onchange="blockMode()"> All day</label>' +
+      '<div id="bk-days"><label class="pad-label" for="bk-until">Until (optional, for more than one day)</label><input type="date" id="bk-until"></div>' +
+      '<div id="bk-times" class="two hidden" style="margin-top:4px;">' +
+        '<div><label class="pad-label" for="bk-from">From</label><input type="time" id="bk-from" value="09:00"></div>' +
+        '<div><label class="pad-label" for="bk-to">To</label><input type="time" id="bk-to" value="13:00"></div>' +
+      '</div>' +
+      '<label class="pad-label" for="bk-note" style="display:block;margin-top:12px;">Note (optional, shows in your calendar)</label>' +
+      '<input type="text" id="bk-note" placeholder="e.g. holiday, dentist">' +
+      '<button class="btn btn-primary" id="bk-save" style="margin-top:12px;" onclick="saveBlock()">Block it</button>' +
+      '<p class="note" id="bk-msg"></p>' +
+    '</div>' +
+    '<h2>Coming up</h2><div id="bk-list"><p class="loading">Loading&hellip;</p></div>';
+  }
+
+  function blockMode() {
+    var all = $("bk-allday").checked;
+    $("bk-days").classList.toggle("hidden", !all);
+    $("bk-times").classList.toggle("hidden", all);
+  }
+
+  function loadBlocks() {
+    call("adminListBlocks").then(function (r) {
+      if (!r.ok) throw new Error(r.error);
+      $("bk-list").innerHTML = r.blocks.length
+        ? '<div class="card">' + r.blocks.map(function (b) {
+            return '<div class="block-row"><span><strong>' + esc(b.label) + '</strong>' + (b.note ? '<br><span class="sub">' + esc(b.note) + '</span>' : '') + '</span>' +
+              '<button class="btn-link" onclick="removeBlock(\'' + esc(b.id) + '\', this)">Remove</button></div>';
+          }).join("") + '</div>'
+        : '<p class="empty">Nothing blocked.</p>';
+    }).catch(function (err) {
+      $("bk-list").innerHTML = '<p class="note bad">Couldn&#8217;t load: ' + esc(err && err.message || err) + '</p>';
+    });
+  }
+
+  function saveBlock() {
+    var b = $("bk-save"), m = $("bk-msg");
+    b.disabled = true; b.textContent = "Saving…"; m.className = "note"; m.textContent = "";
+    call("adminAddBlock", {
+      date: $("bk-date").value, untilDate: $("bk-until").value, allDay: $("bk-allday").checked,
+      from: $("bk-from").value, to: $("bk-to").value, note: $("bk-note").value.trim()
+    }).then(function (r) {
+      b.disabled = false; b.textContent = "Block it";
+      if (!r.ok) { m.className = "note bad"; m.textContent = r.error; return; }
+      m.textContent = r.clashes && r.clashes.length
+        ? "Blocked. You already have " + (r.clashes.length === 1 ? "a booking" : r.clashes.length + " bookings") + " then (" + r.clashes.join(", ") + "); move or cancel it separately."
+        : "Blocked. That time is now off the website.";
+      $("bk-note").value = ""; $("bk-until").value = "";
+      loadBlocks();
+    }).catch(function (err) {
+      b.disabled = false; b.textContent = "Block it";
+      m.className = "note bad"; m.textContent = "Couldn't save: " + (err && err.message || err);
+    });
+  }
+
+  function removeBlock(id, btn) {
+    btn.disabled = true; btn.textContent = "Removing…";
+    call("adminRemoveBlock", id).then(function (r) {
+      if (!r.ok) throw new Error(r.error);
+      loadBlocks();
+    }).catch(function (err) {
+      btn.disabled = false; btn.textContent = "Remove";
+      $("bk-msg").className = "note bad"; $("bk-msg").textContent = "Couldn't remove: " + (err && err.message || err);
+    });
+  }
+
+  function runSearch() {
+    var q = $("q").value.trim();
+    if (q.length < 3) { $("results").innerHTML = '<p class="note">Type at least 3 characters.</p>'; return; }
+    $("results").innerHTML = '<p class="loading">Searching&hellip;</p>';
+    call("adminSearch", q).then(function (r) {
+      $("results").innerHTML = '<h2>Search results</h2>' +
+        (r.results.length ? r.results.map(jobCard).join("") : '<p class="empty">No matches.</p>');
+    }).catch(failed);
+  }
+
+  function sendReminder(token) {
+    var b = $("rb-" + token), m = $("rm-" + token);
+    b.disabled = true; b.textContent = "Sending…";
+    call("adminSendPaymentReminder", token).then(function (r) {
+      if (!r.ok) throw new Error(r.error);
+      m.textContent = "Reminder sent " + r.remindedOn;
+      b.textContent = "Send another reminder"; b.disabled = false;
+    }).catch(function (err) {
+      b.disabled = false; b.textContent = "Email them a payment reminder";
+      m.textContent = "Couldn't send: " + (err && err.message || err);
+    });
+  }
+
+  function togglePaid(token) { $("p-" + token).classList.toggle("open"); }
+
+  function confirmPaid(token) {
+    var btn = $("c-" + token);
+    btn.disabled = true; btn.textContent = "Saving…";
+    call("adminMarkPaid", token, $("d-" + token).value, $("r-" + token).checked).then(function (r) {
+      if (!r.ok) throw new Error(r.error);
+      $("m-" + token).textContent = r.alreadyPaid ? "Already marked paid." : ("Marked paid" + (r.receiptSent ? ", receipt emailed." : "."));
+      setTimeout(loadHome, 900);
+    }).catch(function (err) {
+      btn.disabled = false; btn.textContent = "Confirm paid";
+      $("m-" + token).textContent = "Couldn't save that: " + (err && err.message || err);
+      $("m-" + token).className = "note bad";
+    });
+  }
+
+  function undoPaid(token) {
+    call("adminMarkUnpaid", token).then(function (r) {
+      if (!r.ok) throw new Error(r.error);
+      loadHome();
+    }).catch(failed);
+  }
+
+  // ---------- Single job: on-site sign-off ----------
+  function openJob(token) {
+    app('<p class="loading">Loading job&hellip;</p>');
+    call("adminGetJob", token).then(function (j) {
+      if (!j.ok) return failed(j.error === "not_found" ? "Couldn't find that job." : j.error);
+      renderJob(j);
+    }).catch(failed);
+  }
+
+  function detail(label, value) {
+    return value ? '<div class="row"><span class="label">' + label + '</span><span class="value">' + esc(value) + '</span></div>' : '';
+  }
+
+  function renderJob(j) {
+    var head = '<button class="btn-link back" onclick="loadHome()">&lsaquo; All jobs</button>' +
+      '<h1>' + esc(j.name) + '</h1>' +
+      '<div class="card">' +
+        detail("When", j.when) + detail("Address", j.address) + detail("Site contact", j.contact) + detail("Access", j.access) +
+        detail("What", j.items) + detail("Total", (j.bookingTotal || j.total) + " · " + j.payment) + detail("Reference", j.reference) +
+      '</div>';
+    if (j.cancelled) {
+      app(head + '<div class="card">' +
+        '<p style="margin:0 0 8px;"><span class="pill cancelled">Cancelled ' + esc(j.cancelledAt) + '</span></p>' +
+        detail("Reason", j.cancelledBy) + detail("Note", j.cancelNote) +
+        (j.cancelFee ? detail("Fee", j.cancelFee) + detail("Invoice", j.invoiceNo) + detail("Payment due", j.paymentDue) + detail("Paid", j.paidOn || "Not yet") : "") +
+        (j.invoiceUrl ? '<a class="btn btn-ghost" style="margin-top:10px;" href="' + esc(j.invoiceUrl) + '" target="_blank" rel="noopener">View fee invoice</a>' : '') +
+      '</div>');
+      return;
+    }
+    if (j.completed) {
+      app(head + '<div class="card">' +
+        '<p style="margin:0 0 8px;"><span class="pill done">Signed off ' + esc(j.completedAt) + '</span></p>' +
+        detail("Invoice", j.invoiceNo) + detail("Payment due", j.paymentDue) + detail("Paid", j.paidOn) +
+        (j.invoiceUrl ? '<a class="btn btn-ghost" style="margin-top:10px;" href="' + esc(j.invoiceUrl) + '" target="_blank" rel="noopener">View invoice</a>' : '') +
+      '</div>');
+      return;
+    }
+    var waText = "Hi " + (j.contact || j.name) + ", could you confirm today's clean is done? Tap here to sign it off: " + j.signingLink;
+    var flash = state.flash ? '<p class="note" style="margin:0 0 10px;">' + esc(state.flash) + '</p>' : '';
+    state.flash = "";
+    app(head + flash +
+      '<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="openEdit(\'' + esc(j.token) + '\')">Edit job (details, items, price, time)</button>' +
+      '<div class="card">' +
+        '<div class="pad-label">Customer signature</div>' +
+        '<p class="note" style="margin:0 0 10px;">By signing below, the customer confirms the work above has been completed to their satisfaction.</p>' +
+        '<canvas id="pad"></canvas>' +
+        '<div class="btn-row"><button class="btn btn-ghost" id="btn-clear">Clear</button></div>' +
+      '</div>' +
+      '<button class="btn btn-primary" id="btn-submit" disabled>Confirm job complete</button>' +
+      '<p class="note" id="submit-msg"></p>' +
+      '<div style="text-align:center;margin-top:10px;"><button class="btn-link" onclick="$(\'away\').classList.toggle(\'open\')">Customer not there right now?</button></div>' +
+      '<div class="panel card" id="away">' +
+        '<div class="pad-label">Send them a link to sign themselves</div>' +
+        (j.hasEmail ? '<button class="btn btn-ghost" id="btn-email" style="margin-bottom:8px;">Email them the link</button>' : '') +
+        (j.whatsappNumber ? '<a class="btn btn-ghost" style="margin-bottom:8px;" target="_blank" rel="noopener" href="https://wa.me/' + esc(j.whatsappNumber) + '?text=' + encodeURIComponent(waText) + '">WhatsApp them the link</a>' : '') +
+        '<p class="note" id="link-msg"></p>' +
+        '<div style="border-top:1px solid var(--line);margin-top:12px;padding-top:12px;">' +
+          '<label class="pad-label" for="reason">Or complete without a signature</label>' +
+          '<input type="text" id="reason" placeholder="Reason, e.g. no one home, key left out">' +
+          '<button class="btn btn-ghost" id="btn-nosig" style="margin-top:8px;">Complete without signature</button>' +
+        '</div>' +
+      '</div>' +
+      cancelPanel(j));
+    initPad(j);
+    initCancel(j);
+  }
+
+  // ---------- Cancelling a booking ----------
+  function cancelPanel(j) {
+    return '<div style="text-align:center;margin-top:18px;"><button class="btn-link" onclick="$(\'cancel\').classList.toggle(\'open\')">Cancel this booking</button></div>' +
+      '<div class="panel card" id="cancel">' +
+        '<div class="pad-label">Why is it being cancelled?</div>' +
+        (j.lateNotice ? '<p style="margin:0 0 6px;"><span class="pill late">Less than 24 hours&#8217; notice</span></p>' : '') +
+        '<label class="radio"><input type="radio" name="cx-reason" value="customer"> ' + (j.channel === "Agent/Landlord" ? "Agent or landlord cancelled" : "Customer cancelled") + '</label>' +
+        '<label class="radio"><input type="radio" name="cx-reason" value="noaccess"> Couldn&#8217;t get in on the day</label>' +
+        '<label class="radio"><input type="radio" name="cx-reason" value="us"> We&#8217;re cancelling (illness, van, weather)</label>' +
+        '<div class="feebox hidden" id="cx-feebox">' +
+          '<label class="check"><input type="checkbox" id="cx-fee"> Charge the ' + esc(j.feeAmount) + ' fee (invoice emailed, due in 14 days)</label>' +
+        '</div>' +
+        '<label class="pad-label" for="cx-note" style="display:block;margin-top:12px;">Note (optional, just for you)</label>' +
+        '<input type="text" id="cx-note" placeholder="e.g. moving date changed">' +
+        '<label class="check"><input type="checkbox" id="cx-email"' + (j.hasEmail ? ' checked' : ' disabled') + '> Email ' + (j.channel === "Agent/Landlord" ? "them" : "the customer") + ' to say it&#8217;s cancelled</label>' +
+        '<p class="note" style="margin:0 0 10px;">This takes it off your calendar, so the slot can be booked online again. It can&#8217;t be undone; to put it back, make a new booking.</p>' +
+        '<button class="btn btn-danger" id="cx-go" disabled>Cancel booking</button>' +
+        '<p class="note" id="cx-msg"></p>' +
+      '</div>';
+  }
+
+  function initCancel(j) {
+    var go = $("cx-go"), feebox = $("cx-feebox"), fee = $("cx-fee");
+    function reason() { var r = document.querySelector('input[name="cx-reason"]:checked'); return r ? r.value : ""; }
+    function update() {
+      var r = reason();
+      // The fee only applies to a late cancellation or no access, never when we cancel.
+      var feeAllowed = r && r !== "us" && (j.lateNotice || r === "noaccess");
+      feebox.classList.toggle("hidden", !feeAllowed);
+      if (!feeAllowed) fee.checked = false;
+      go.disabled = !r;
+      go.textContent = fee.checked ? "Cancel and invoice " + j.feeAmount : "Cancel booking";
+    }
+    document.querySelectorAll('input[name="cx-reason"]').forEach(function (el) { el.addEventListener("change", update); });
+    fee.addEventListener("change", update);
+    go.onclick = function () {
+      go.disabled = true; go.textContent = "Cancelling…";
+      call("adminCancelJob", j.token, {
+        reason: reason(), note: $("cx-note").value.trim(),
+        emailCustomer: $("cx-email").checked, chargeFee: fee.checked
+      }).then(function (r) {
+        if (!r.ok) throw new Error(r.error);
+        var lines = [];
+        if (r.alreadyCancelled) lines.push("This booking was already cancelled.");
+        else {
+          lines.push(r.calendarRemoved ? "Removed from your calendar." : "There was no calendar event to remove.");
+          if (r.invoiceNo) lines.push("Fee invoice " + r.invoiceNo + " (" + r.feeAmount + ") is in your Unpaid list.");
+          lines.push(r.emailed ? "Customer emailed." : "No email sent.");
+        }
+        app('<div class="card"><p style="margin:0 0 6px;"><span class="pill cancelled">Cancelled</span></p>' +
+          '<p class="note" style="margin:0;">' + esc(lines.join(" ")) + '</p></div>' +
+          '<button class="btn btn-ghost" onclick="loadHome()">Back to all jobs</button>');
+      }).catch(function (err) {
+        update();
+        $("cx-msg").textContent = "Couldn't cancel: " + (err && err.message || err);
+        $("cx-msg").className = "note bad";
+      });
+    };
+  }
+
+  function initPad(j) {
+    var canvas = $("pad"), ctx = canvas.getContext("2d"), drawing = false, touched = false, submit = $("btn-submit");
+    var ratio = window.devicePixelRatio || 1, rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * ratio; canvas.height = rect.height * ratio; ctx.scale(ratio, ratio);
+    ctx.lineWidth = 2.2; ctx.lineCap = "round";
+    // Always dark ink, even in dark mode, so the saved signature is visible
+    // on the white completion PDF.
+    ctx.strokeStyle = "#12232B";
+    canvas.style.background = "#FFFFFF";
+    function pos(e) { var r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+    canvas.addEventListener("pointerdown", function (e) { drawing = true; touched = true; var p = pos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); submit.disabled = false; });
+    canvas.addEventListener("pointermove", function (e) { if (!drawing) return; var p = pos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); });
+    ["pointerup", "pointerleave", "pointercancel"].forEach(function (ev) { canvas.addEventListener(ev, function () { drawing = false; }); });
+    $("btn-clear").onclick = function () { ctx.clearRect(0, 0, canvas.width, canvas.height); touched = false; submit.disabled = true; };
+
+    function done(r, msg) {
+      if (!r.ok) throw new Error(r.error);
+      app('<div class="card"><p style="margin:0 0 6px;"><span class="pill done">' + (r.alreadyCompleted ? "Already signed off" : "Signed off") + '</span></p>' +
+        '<p class="note" style="margin:0;">' + (r.alreadyCompleted ? "This job was already complete." : msg + " Invoice " + esc("INV-" + r.invoiceNumber) + " has been emailed.") + '</p></div>' +
+        '<button class="btn btn-ghost" onclick="loadHome()">Back to all jobs</button>');
+    }
+    function fail(el, btn, label) {
+      return function (err) { btn.disabled = false; btn.textContent = label; el.textContent = "Couldn't save that: " + (err && err.message || err); el.className = "note bad"; };
+    }
+    submit.onclick = function () {
+      if (!touched) return;
+      submit.disabled = true; submit.textContent = "Sending…";
+      call("adminCompleteJob", j.token, canvas.toDataURL("image/png"), "")
+        .then(function (r) { done(r, "Signed off."); })
+        .catch(fail($("submit-msg"), submit, "Confirm job complete"));
+    };
+    $("btn-nosig").onclick = function () {
+      var b = $("btn-nosig"); b.disabled = true; b.textContent = "Sending…";
+      call("adminCompleteJob", j.token, "", $("reason").value.trim())
+        .then(function (r) { done(r, "Marked complete without a signature."); })
+        .catch(fail($("link-msg"), b, "Complete without signature"));
+    };
+    if ($("btn-email")) $("btn-email").onclick = function () {
+      var b = $("btn-email"); b.disabled = true; b.textContent = "Sending…";
+      call("adminSendSigningLink", j.token).then(function (r) {
+        b.disabled = false; b.textContent = "Email them the link";
+        $("link-msg").textContent = r.ok ? "Link emailed." : "Couldn't send: " + r.error;
+      }).catch(fail($("link-msg"), b, "Email them the link"));
+    };
+  }
+
+  if (INIT.view === "job" && INIT.token) openJob(INIT.token); else loadHome();
+</script>
+</body>
+</html>

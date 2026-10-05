@@ -1,0 +1,3459 @@
+/**
+ * EasyClean Somerset — booking backend (Google Apps Script Web App)
+ *
+ * What this does: replaces the old Google Calendar "Appointment Schedule"
+ * widget. It runs inside Niall's own Google account (no third party sees
+ * this code or this data) and does two jobs for the website:
+ *
+ *   1. GET  ?action=slots   -> which times are actually free, checked
+ *                              live against this Google account's
+ *                              default calendar.
+ *   2. POST { action: "book", ... } -> creates the calendar event
+ *                              directly, with the customer's item list,
+ *                              estimated job time, price, address, phone
+ *                              and payment method written straight into
+ *                              the event, emails
+ *                              the customer a confirmation, and records
+ *                              the booking as a row in a Google Sheet
+ *                              (see setUpCustomerSheet() below) so past
+ *                              customers can actually be searched and
+ *                              filtered, not just found by scrolling
+ *                              through calendar events.
+ *   3. A daily trigger (sendDayOfReminders, see setUpDailyReminders()
+ *                              below) emails every customer booked in for
+ *                              that day a morning-of reminder.
+ *   4. GET  ?action=job&t=  -> looks a booking up by its secret job token
+ *                              (used by job-complete.html, the page a
+ *                              customer signs from) and returns the basics.
+ *   5. POST { action: "complete", token, signature } -> records a
+ *                              customer's signature (from job-complete.html),
+ *                              marks it done in the customer sheet, saves
+ *                              the invoice and signed completion PDFs to
+ *                              Drive, and emails them out. Consumers get a
+ *                              paid receipt + review request; agents paying
+ *                              by bank transfer get a 14-day payment-due
+ *                              invoice billed to their office address.
+ *
+ * SETUP (one-time):
+ *   1. script.google.com -> New project -> paste this whole file in,
+ *      replacing whatever's there by default.
+ *   2. Check WEEKLY_SLOTS below matches your real availability. It's
+ *      pre-filled to roughly match "Mon-Fri early & evening, Saturday
+ *      full day, Sunday by arrangement" as already shown on the site.
+ *   3. Project Settings (gear icon, left sidebar) -> General settings ->
+ *      Time zone -> set to "(GMT+00:00) London". Important: if this is
+ *      wrong, every slot time offered will be wrong too.
+ *   4. Deploy -> New deployment -> type: Web app -> Execute as: Me ->
+ *      Who has access: Anyone -> Deploy. Click "Authorize access" and
+ *      allow it (it's asking to let this script see your calendar and
+ *      send email from your own address — normal for this setup).
+ *   5. Copy the Web app URL (ends in /exec) into APPS_SCRIPT_URL in the
+ *      website's JS.
+ *   6. One more one-time step so "Choose a time" loads instantly instead
+ *      of waiting on a live calendar lookup: pick "setUpAutoRefresh" from
+ *      the function dropdown next to the Run button (top toolbar) and
+ *      click Run. See the comment directly above that function for what
+ *      it does and why. Authorize it the same way as step 4 if asked.
+ *   7. Same again for the customer database: pick "setUpCustomerSheet"
+ *      from the same dropdown and click Run. Creates a new Google Sheet
+ *      in your Drive and remembers it automatically — nothing to copy or
+ *      paste. See the comment above that function for details.
+ *   8. Same again for the morning reminder: pick "setUpDailyReminders"
+ *      from the same dropdown and click Run. See the comment above that
+ *      function for details.
+ *   9. REVIEW_URL below is already set to the real Trustpilot review page —
+ *      nothing to do here unless that link ever changes.
+ *  10. Bank details for agent invoices: Project Settings -> Script
+ *      Properties -> add BANK_ACCOUNT_NAME, BANK_SORT_CODE and
+ *      BANK_ACCOUNT_NUMBER. Then pick "checkInvoiceSettings" from the
+ *      function dropdown and Run it to confirm they're picked up.
+ *  11. Agency billing addresses: fill in the "Agencies" tab of the
+ *      customer sheet (created automatically the first time an agent job
+ *      is completed, one row per agency).
+ *  12. Private admin app (on-site sign-off, unpaid invoices, mark paid):
+ *      see "ADMIN APP SETUP" near the bottom of this file. Needs the
+ *      Dashboard.html file adding to this project and a second deployment.
+ *  13. After pasting a version that adds a new Google permission (e.g.
+ *      the price check's "connect to an external service"), run
+ *      checkPriceList once from the function dropdown and allow it BEFORE
+ *      redeploying, or live bookings fail until you do.
+ *  14. Service area: the postcode districts we take online bookings in
+ *      are listed in service-area.js on the website, not in this file.
+ *      Edit that file on GitHub to change the area; bookings pick it up
+ *      within the hour. checkPriceList also logs the list it reads.
+ *  15. Signature images are now private. Run makeSignaturesPrivate once
+ *      to switch off link-sharing on the ones saved before this version.
+ *  16. Day-before reminders and the Monday unpaid-invoice email run from
+ *      the existing daily trigger (setUpDailyReminders); nothing to set up.
+ *  17. Run repairSheetTextColumns once: it sets the Bookings sheet's text
+ *      columns to plain text and puts back lost leading zeros on phone
+ *      numbers. Bank holidays now close automatically (GOV.UK's list), and
+ *      the admin app's "Time off" tab blocks other days or hours.
+ *  18. Check Project Settings -> Time zone is Europe/London (slot times
+ *      depend on it, especially when the clocks change).
+ *
+ * IMPORTANT — updating this file later (every time, not just the first
+ * time): pasting new code into the editor and saving it is NOT enough on
+ * its own. The live Web App URL (the one ending in /exec, wired into the
+ * website) is pinned to a specific deployed "version" of this script —
+ * saving an edit updates what you see in the editor, but the live URL
+ * keeps serving the OLD code until you explicitly push a new version to
+ * it. After pasting any update and saving:
+ *   1. Deploy (top-right) -> Manage deployments.
+ *   2. Click the pencil/edit icon on the existing active deployment.
+ *   3. Under "Version", choose "New version".
+ *   4. Click Deploy.
+ * This keeps the exact same /exec URL (nothing in the website's JS needs
+ * to change) but makes it start running the code you just pasted. Skipping
+ * this step is why a change can look "done" (saved, no errors) but the
+ * live site keeps behaving like the old code was never updated.
+ *
+ * Running a function directly from the editor (via the function dropdown
+ * + Run button, e.g. setUpAutoRefresh or setUpCustomerSheet) is different
+ * and NOT affected by this — that always runs whatever is currently saved
+ * in the editor, live deployment or not. That's one-time setup, though;
+ * it doesn't make the deployed Web App itself pick up the new code.
+ */
+
+// ====== CONFIG — edit these to match your real setup ======
+var SLOT_MINS = 150;       // must match SLOT_MINS in the website's JS
+var LEAD_TIME_HOURS = 24;  // minimum notice before a booking can start
+var DAYS_AHEAD = 21;       // how many days forward to offer slots (3 weeks)
+var TIMEZONE = "Europe/London";
+var WHATSAPP_NUMBER = "447873212249"; // must match WHATSAPP_NUMBER in the website's JS
+var SITE_URL = "https://easycleansomerset.co.uk";
+var BUSINESS_NAME = "Niall Maher";                 // real trading name, used on invoices — same one on terms.html
+var BUSINESS_ADDRESS = "33 Ivy Walk, Midsomer Norton, BA3 2EE";
+var REMINDER_HOUR = 7; // morning-of reminder emails go out in this hour, local time (TIMEZONE above)
+var REVIEW_URL = "https://uk.trustpilot.com/review/easycleansomerset.co.uk";
+
+// Every booking is also written as a row into a Google Sheet, alongside the
+// calendar event createBooking() already creates. A calendar isn't built for
+// searching or filtering; this is what actually lets you find a past
+// customer, see what they've had done before, or pull a list for marketing.
+// Run setUpCustomerSheet() ONCE (same way as setUpAutoRefresh below) and it
+// creates the sheet and remembers its ID for you — nothing to copy or paste.
+var CUSTOMER_SHEET_PROPERTY_KEY = "customerSheetId";
+var CUSTOMER_SHEET_HEADERS = [
+  "Timestamp", "Reference", "Name", "Phone", "Email", "Address",
+  "Items", "Total", "Payment method", "Booking time", "Marketing opt-in",
+  "Referral / offer code", "Channel", "Business name", "Site contact name",
+  "Site contact phone", "Agent/Agency ID",
+  // A long random secret per booking. The customer-facing signing link and
+  // the private admin app identify a booking by this, never by the short
+  // EC- reference, which is short enough to guess. Added to the live sheet
+  // automatically (see appendCustomerRow) and backfilled for older rows.
+  "Job token",
+  // Agent bookings only: "Someone on site" or "Agent arranging (24h notice)".
+  "Access",
+  // Filled in later, by completeJob(), once the job's signed off on-site —
+  // blank on every row from the moment it's booked until then.
+  "Completed at", "Signature link", "Invoice number",
+  "Invoice PDF", "Completion PDF", "Payment due", "Paid on"
+];
+
+// Every column completeJob() writes to. Unlike the booking-time columns
+// above, these are added to the live sheet automatically (at the end of the
+// header row) the first time a job is completed and any of them is missing,
+// so there's no by-hand header step for this round. "Paid on" is the one
+// column Niall fills in himself, when an agent's bank transfer lands; it's
+// pre-filled for cash/on-the-day payments, which are paid at completion.
+var COMPLETION_COLUMNS = [
+  "Completed at", "Signature link", "Invoice number",
+  "Invoice PDF", "Completion PDF", "Payment due", "Paid on"
+];
+
+// Agent/landlord invoices are payment-due invoices rather than receipts.
+var AGENT_PAYMENT_TERMS_DAYS = 14;
+
+// Late cancellation / no-access call-out fee (terms section 5), and how long
+// the customer has to pay it. Only ever charged when Niall ticks the box in
+// the admin app's cancel panel.
+var LATE_CANCELLATION_FEE = 25;
+var CANCELLATION_FEE_TERMS_DAYS = 14;
+var CANCELLATION_COLUMNS = ["Cancelled at", "Cancelled by", "Cancellation note", "Cancellation fee"];
+
+// Bank details are NOT stored in this file. They're read from the Apps
+// Script project's Script Properties (Project Settings -> Script
+// Properties), so they never sit in a copy of this code. Run
+// checkInvoiceSettings() once after adding them to confirm they're picked up.
+var BANK_PROPERTY_KEYS = {
+  accountName: "BANK_ACCOUNT_NAME",
+  sortCode: "BANK_SORT_CODE",
+  accountNumber: "BANK_ACCOUNT_NUMBER"
+};
+
+// A second tab in the customer spreadsheet, one row per agency, holding the
+// billing details the agents.html form deliberately doesn't ask for (to
+// keep that form short). Created automatically. The first time an agency's
+// job is completed, its name is added here with the other columns blank,
+// so it's obvious which agencies still need a billing address filling in.
+var AGENCIES_SHEET_NAME = "Agencies";
+var AGENCIES_HEADERS = ["Business name", "Billing address", "Accounts email"];
+
+// Drive folders for the documents completeJob() generates, each split into
+// a "YYYY-MM" subfolder per month so a year's invoices are easy to hand to
+// an accountant. Created automatically on first use.
+var INVOICES_FOLDER_NAME = "EasyClean Somerset — Invoices";
+var COMPLETIONS_FOLDER_NAME = "EasyClean Somerset — Completions";
+
+// Possible job START times per weekday (0 = Sunday .. 6 = Saturday),
+// 24-hour "HH:mm". These don't need to avoid each other or leave gaps —
+// a candidate time that would overlap a real booking (or anything else
+// on the calendar, like an ad hoc school-pickup block) is automatically
+// filtered out by getAvailableSlots() below, so it's safe to offer one
+// every hour and let real clashes do the filtering. An empty array
+// means no online slots are offered that day at all (e.g. Sunday, "by
+// arrangement" per the website — handle those over WhatsApp instead).
+var WEEKLY_SLOTS = {
+  0: [],                                                                                          // Sunday — by arrangement only
+  1: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"], // Monday
+  2: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"], // Tuesday
+  3: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"], // Wednesday
+  4: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"], // Thursday
+  5: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"], // Friday
+  6: ["08:00", "09:00", "10:00", "11:00", "12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00"]  // Saturday
+};
+// ============================================================
+
+function doGet(e) {
+  var p = (e && e.parameter) || {};
+  try {
+    // The private admin app. Only ever served to the Google account that
+    // owns this script (see isOwner). Deploy it as a second web app with
+    // "Who has access: Only myself" so Google itself asks for that sign-in;
+    // the owner check here also blocks it on the public deployment.
+    // A bare URL (no action) also opens the admin app, so the admin
+    // deployment's plain /exec link works as a home-screen bookmark. The
+    // website itself never calls the bare URL, and anyone who isn't the
+    // owner just gets "Not available".
+    if (p.page || !p.action) {
+      // Anyone who isn't the owner gets plain text, never an HTML page.
+      // Any HTML page served by this script lets the visitor call the
+      // script's functions from their browser (google.script.run), so the
+      // public deployment must never serve one.
+      if (!isOwner()) return notAvailable();
+      return serveAdminPage(p);
+    }
+    if (p.action === "slots") {
+      return jsonResponse({ ok: true, slots: getAvailableSlotsCached() });
+    }
+    if (p.action === "job") {
+      return jsonResponse(getPublicJob(p.t));
+    }
+    return jsonResponse({ ok: false, error: "unknown_action" });
+  } catch (err) {
+    console.error("doGet failed: " + err);
+    return jsonResponse({ ok: false, error: "server_error" });
+  }
+}
+
+function notAvailable() {
+  return ContentService.createTextOutput("Not available.");
+}
+
+// Public endpoints only: taking a booking, and a customer signing their own
+// job from an emailed/WhatsApped link carrying its secret token. Everything
+// else (completing without a signature, sending signing links, marking
+// invoices paid) happens in the private admin app via google.script.run.
+function doPost(e) {
+  try {
+    var data = JSON.parse(e.postData.contents);
+    if (data.action === "book") {
+      return jsonResponse(createBooking(data));
+    }
+    if (data.action === "complete") {
+      return jsonResponse(completeJobPublic(data));
+    }
+    return jsonResponse({ ok: false, error: "unknown_action" });
+  } catch (err) {
+    console.error("doPost failed: " + err);
+    return jsonResponse({ ok: false, error: "server_error" });
+  }
+}
+
+function jsonResponse(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+// Shared by every HTML-building function below (the confirmation, reminder
+// and thank-you emails, plus the invoice PDF) — pulled out to one place
+// rather than redefined in each, so there's exactly one escaping rule to
+// get right.
+function escHtml(s) {
+  return String(s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+  });
+}
+
+// Speed fix #2: the previous fix (one calendar lookup for the whole window,
+// instead of one per candidate slot) cut the calendar work down a lot, but
+// "Choose a time" was still slow — because that one remaining
+// cal.getEvents() call, plus Apps Script's own per-request startup
+// overhead, both sit directly in the path of every single visitor's
+// request. Fix: stop doing that work on the visitor's request at all.
+// A time-driven trigger (set up once, see setUpAutoRefresh() below) recomputes
+// the slot list every few minutes in the background and stores it in
+// CacheService, so a real visitor's request just reads a cache entry back —
+// no calendar call, no per-slot loop, nothing but "hand back what's already
+// sitting there." A booking still gets checked for real, live, at the
+// moment it's submitted (see createBooking below), so the few minutes of
+// staleness here can never actually cause a double-booking; it only means a
+// slot someone just took might still be *offered* to someone else for up to
+// a few minutes, and their booking attempt would then be correctly turned
+// away and shown available slots. Worth that trade for a "choose a time"
+// that loads instantly instead of waiting on a live calendar lookup.
+var SLOTS_CACHE_KEY = "availableSlots_v1";
+var SLOTS_CACHE_SECONDS = 21600; // 6 hours — CacheService's own maximum
+
+function getAvailableSlotsCached() {
+  var cache = CacheService.getScriptCache();
+  var cached = cache.get(SLOTS_CACHE_KEY);
+  if (cached) return JSON.parse(cached);
+
+  // Cache miss — most likely the very first request since this was
+  // deployed, or since setUpAutoRefresh() was last run. Compute it live so
+  // slots are never simply broken, and warm the cache for everyone after.
+  return refreshSlotsCache();
+}
+
+function refreshSlotsCache() {
+  var slots = getAvailableSlots();
+  CacheService.getScriptCache().put(SLOTS_CACHE_KEY, JSON.stringify(slots), SLOTS_CACHE_SECONDS);
+  return slots;
+}
+
+/**
+ * Run this ONCE, manually: open this project at script.google.com, pick
+ * "setUpAutoRefresh" from the function dropdown next to the Run button (top
+ * toolbar), and click Run. First time only, it'll ask you to authorize it
+ * (same as the original deploy) — allow it. That's it: from then on, the
+ * slots cache keeps itself warm automatically, forever, with no further
+ * action needed, even across future edits to this file. You only need to
+ * run this again if you ever see it stop updating (Apps Script -> clock
+ * icon on the left sidebar -> Triggers, to check it's still listed).
+ */
+function setUpAutoRefresh() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "refreshSlotsCache") ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("refreshSlotsCache").timeBased().everyMinutes(10).create();
+  refreshSlotsCache(); // populate it right away instead of waiting 10 minutes
+}
+
+/**
+ * Run this ONCE, the same way as setUpAutoRefresh above: pick
+ * "setUpCustomerSheet" from the function dropdown next to the Run button and
+ * click Run. Creates a new Google Sheet called "EasyClean Somerset —
+ * Customers" in your Drive, adds the header row, and remembers its ID (via
+ * PropertiesService, not a constant in this file) so every future booking
+ * writes itself in automatically. Safe to run again later — if a sheet's
+ * already set up and reachable, it leaves it alone rather than creating a
+ * second one.
+ */
+function setUpCustomerSheet() {
+  var props = PropertiesService.getScriptProperties();
+  var existingId = props.getProperty(CUSTOMER_SHEET_PROPERTY_KEY);
+  if (existingId) {
+    try {
+      var existing = SpreadsheetApp.openById(existingId);
+      Logger.log("Customer sheet already set up: " + existing.getUrl());
+      return;
+    } catch (e) {
+      // Old ID no longer opens (sheet deleted, etc.) — fall through and
+      // create a fresh one rather than leaving bookings unrecorded forever.
+    }
+  }
+  var ss = SpreadsheetApp.create("EasyClean Somerset — Customers");
+  var sheet = ss.getSheets()[0];
+  sheet.setName("Bookings");
+  sheet.getRange(1, 1, 1, CUSTOMER_SHEET_HEADERS.length).setValues([CUSTOMER_SHEET_HEADERS]).setFontWeight("bold");
+  sheet.setFrozenRows(1);
+  CUSTOMER_SHEET_HEADERS.forEach(function (h, i) {
+    if (TEXT_COLUMNS.indexOf(h) !== -1) sheet.getRange(2, i + 1, sheet.getMaxRows() - 1, 1).setNumberFormat("@");
+  });
+  props.setProperty(CUSTOMER_SHEET_PROPERTY_KEY, ss.getId());
+  Logger.log("Customer sheet created: " + ss.getUrl());
+}
+
+// Appends one row per booking to the "Bookings" sheet. Wrapped defensively
+// wherever this is called — a missing sheet (setUpCustomerSheet() not run
+// yet) or any Sheets error should never fail an otherwise-successful
+// booking, same principle as the confirmation email below.
+//
+// Written by HEADER NAME, not by position. A live sheet's actual header row
+// can end up in a different order than CUSTOMER_SHEET_HEADERS below, or be
+// missing a column entirely, if a header was ever added to this list without
+// also being added by hand to the sheet that already exists (setUpCustomerSheet()
+// never retroactively adds columns — see its own comment). Writing
+// positionally in that situation silently puts the wrong value under the
+// wrong header (e.g. a channel value landing in a "Completed at" column) —
+// this looks the value up by whatever header text is actually on the sheet,
+// in whatever order it's actually in, and writes "" for a value whose header
+// isn't there at all rather than shifting every later column over by one.
+function appendCustomerRow(data, reference, slotLabel, jobToken) {
+  var sheet = getCustomerSheet();
+  if (!sheet) return; // setUpCustomerSheet() hasn't been run yet
+  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes"]);
+  var byHeader = {
+    "Timestamp": new Date(),
+    "Reference": reference,
+    "Name": data.name,
+    "Phone": data.phone,
+    "Email": data.email,
+    "Address": data.address,
+    "Items": data.items,
+    "Total": data.total,
+    "Payment method": data.payment,
+    "Booking time": slotLabel,
+    "Marketing opt-in": data.marketingOptIn ? "Yes" : "No",
+    "Referral / offer code": data.referralCode || "",
+    "Channel": data.channel || "Consumer",
+    "Business name": data.businessName || "",
+    "Site contact name": data.siteContactName || "",
+    "Site contact phone": data.siteContactPhone || "",
+    "Agent/Agency ID": data.agencyId || "",
+    "Job token": jobToken || "",
+    "Access": data.channel === "Agent/Landlord" ? accessLabel(data) : "",
+    "Booked via": data.bookedVia || "Website",
+    "Notes": data.notes || ""
+    // Completed at / Signature link / Invoice number are deliberately not
+    // set here — completeJob() fills those in later, once the job's signed
+    // off, the same way it already looks its columns up by header name.
+  };
+  var row = headerRow.map(function (header) {
+    var val = Object.prototype.hasOwnProperty.call(byHeader, header) ? byHeader[header] : "";
+    // Text a customer typed must never be read by Sheets as a formula.
+    return typeof val === "string" && val.charAt(0) === "=" ? " " + val : val;
+  });
+  writeTextSafeRow(sheet, headerRow, row);
+}
+
+// Columns that must stay exactly as typed. Without this, Google Sheets turns
+// "07700 900000"-style numbers into 7700900000 (losing the 0), "+44..." into
+// a number, "£35" into 35 and the booking time label into a date.
+var TEXT_COLUMNS = ["Reference", "Name", "Phone", "Email", "Address", "Items", "Total", "Payment method",
+  "Booking time", "Referral / offer code", "Business name", "Site contact name", "Site contact phone",
+  "Agent/Agency ID", "Job token", "Access", "Booked via", "Notes", "Changes"];
+
+function columnLetter(n) {
+  var s = "";
+  while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+
+// Writes one new row at the bottom, with the text columns set to plain
+// text first so Sheets keeps them exactly as written.
+function writeTextSafeRow(sheet, headerRow, row) {
+  var r = sheet.getLastRow() + 1;
+  if (r > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(), 1);
+  var cells = [];
+  headerRow.forEach(function (h, i) { if (TEXT_COLUMNS.indexOf(h) !== -1) cells.push(columnLetter(i + 1) + r); });
+  if (cells.length) sheet.getRangeList(cells).setNumberFormat("@");
+  sheet.getRange(r, 1, 1, row.length).setValues([row]);
+}
+
+// A phone number read back from the sheet, as text with its leading 0 (or
+// +) restored if Sheets stored it as a number in older rows.
+function phoneText(val) {
+  if (val === null || val === undefined || val === "") return "";
+  if (typeof val === "number") {
+    var d = String(Math.round(val));
+    if (d.length === 10) return "0" + d;
+    if (d.length === 12 && d.indexOf("44") === 0) return "+" + d;
+    return d;
+  }
+  return String(val);
+}
+
+/**
+ * Run once after pasting this version (function dropdown -> Run). Sets the
+ * text columns on the Bookings sheet to plain text so new values stay as
+ * typed, and repairs older rows: phone numbers get their leading 0 (or +)
+ * back, totals stored as numbers get their £ back, and booking times stored
+ * as dates become readable text again. Safe to run again.
+ */
+function repairSheetTextColumns() {
+  var sheet = getCustomerSheet();
+  if (!sheet) { Logger.log("Customer sheet not set up."); return; }
+  var header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var lastRow = sheet.getLastRow();
+  var fixed = { phone: 0, total: 0, time: 0 };
+  header.forEach(function (h, i) {
+    if (TEXT_COLUMNS.indexOf(h) === -1) return;
+    var col = i + 1;
+    var whole = sheet.getRange(2, col, Math.max(sheet.getMaxRows() - 1, 1), 1);
+    if (lastRow < 2) { whole.setNumberFormat("@"); return; }
+    var range = sheet.getRange(2, col, lastRow - 1, 1);
+    var values = range.getValues();
+    var changed = false;
+    var out = values.map(function (r) {
+      var val = r[0];
+      if ((h === "Phone" || h === "Site contact phone") && typeof val === "number") { fixed.phone++; changed = true; return [phoneText(val)]; }
+      if (h === "Total" && typeof val === "number") { fixed.total++; changed = true; return ["£" + (val % 1 ? val.toFixed(2) : String(val))]; }
+      if (h === "Booking time" && val instanceof Date) { fixed.time++; changed = true; return [fmtWhen(val)]; }
+      if (val instanceof Date || typeof val === "number") { changed = true; return [String(val)]; }
+      return [val];
+    });
+    whole.setNumberFormat("@");
+    if (changed) range.setValues(out);
+  });
+  Logger.log("Text columns set to plain text. Repaired " + fixed.phone + " phone number(s), " + fixed.total +
+    " total(s) and " + fixed.time + " booking time(s).");
+}
+
+// Opens the customer sheet, keyed by header name rather than a hardcoded
+// column index — the sheet's columns have already grown twice (agent
+// fields, then completion fields) and will likely grow again, so reads
+// built this way keep working without editing every function that reads a
+// row every time a column gets added. Returns null if the sheet hasn't
+// been set up yet.
+function getCustomerSheet() {
+  var sheetId = PropertiesService.getScriptProperties().getProperty(CUSTOMER_SHEET_PROPERTY_KEY);
+  if (!sheetId) return null;
+  return SpreadsheetApp.openById(sheetId).getSheetByName("Bookings");
+}
+
+function rowToObject(headerRow, valuesRow) {
+  var obj = {};
+  headerRow.forEach(function (header, i) { obj[header] = valuesRow[i]; });
+  return obj;
+}
+
+// Finds a booking by its "EC-XXXX" reference. Returns { rowIndex (1-based,
+// ready to use with sheet.getRange), values (object keyed by header name) }
+// or null if the sheet isn't set up yet or nothing matches.
+function findBookingRow(reference) {
+  var sheet = getCustomerSheet();
+  if (!sheet) return null;
+  var data = sheet.getDataRange().getValues();
+  var headerRow = data[0];
+  var refCol = headerRow.indexOf("Reference");
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][refCol] === reference) {
+      return { rowIndex: i + 1, values: rowToObject(headerRow, data[i]) };
+    }
+  }
+  return null;
+}
+
+// Every calendar event this system creates starts its description with
+// "Reference: EC-XXXX" (see createBooking below) — a fixed, predictable
+// first line, so pulling it back out is a plain string match, not fragile
+// parsing of free text.
+function referenceFromEvent(event) {
+  var description = event.getDescription() || "";
+  var match = description.match(/Reference:\s*(EC-\d+)/);
+  return match ? match[1] : null;
+}
+
+// Which of today's calendar events are actually bookings (as opposed to,
+// say, an ad hoc school-pickup block Niall's added by hand) — anything with
+// no "Reference:" line is skipped rather than mistaken for a job.
+function getTodaysBookingReferences() {
+  var cal = CalendarApp.getDefaultCalendar();
+  var events = cal.getEventsForDay(new Date());
+  var refs = [];
+  events.forEach(function (ev) {
+    var ref = referenceFromEvent(ev);
+    if (ref) refs.push(ref);
+  });
+  return refs;
+}
+
+function getAvailableSlots() {
+  var cal = CalendarApp.getDefaultCalendar();
+  var now = new Date();
+  var earliest = new Date(now.getTime() + LEAD_TIME_HOURS * 3600000);
+
+  var rangeStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var rangeEnd = new Date(rangeStart.getTime());
+  rangeEnd.setDate(rangeEnd.getDate() + DAYS_AHEAD);
+
+  // Speed fix: this used to call cal.getEvents() once per candidate slot
+  // (100+ separate calendar lookups for a multi-week, hourly-slot window),
+  // which is what made "choose a time" slow to load. Instead, fetch the
+  // whole window's events in ONE calendar lookup, then check each
+  // candidate slot against that single in-memory list. Same result, a
+  // fraction of the wait.
+  var busy = cal.getEvents(rangeStart, rangeEnd).map(function (ev) {
+    return { start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime() };
+  });
+
+  function overlapsBusy(start, end) {
+    var s = start.getTime();
+    var e = end.getTime();
+    for (var i = 0; i < busy.length; i++) {
+      if (s < busy[i].end && e > busy[i].start) return true;
+    }
+    return false;
+  }
+
+  var closed = closedDaySet();
+  var slots = [];
+  for (var d = 0; d < DAYS_AHEAD; d++) {
+    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + d);
+    if (closed[Utilities.formatDate(day, TIMEZONE, "yyyy-MM-dd")] || closed[Utilities.formatDate(day, TIMEZONE, "MM-dd")]) continue;
+    var weekday = day.getDay();
+    var times = WEEKLY_SLOTS[weekday] || [];
+
+    times.forEach(function (t) {
+      var parts = t.split(":");
+      var start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), parseInt(parts[0], 10), parseInt(parts[1], 10));
+      var end = new Date(start.getTime() + SLOT_MINS * 60000);
+      if (start < earliest) return;
+      if (overlapsBusy(start, end)) return;
+
+      slots.push({
+        start: start.toISOString(),
+        dayLabel: Utilities.formatDate(start, TIMEZONE, "EEE d MMM"),
+        timeLabel: Utilities.formatDate(start, TIMEZONE, "h:mma")
+      });
+    });
+  }
+  return slots;
+}
+
+// Public entry point for a booking. Everything the browser sends is
+// treated as untrusted: spam trap, booking-rate cap, a slot check against
+// the times we actually offer, and the price recalculated from the live
+// price list. One booking at a time (script lock) so two people can't take
+// the same slot at the same moment.
+function createBooking(data) {
+  // Spam trap: a hidden field real visitors never see or fill in. Bots that
+  // fill every field get a fake "ok" and nothing is booked.
+  if (data.website) {
+    console.warn("Honeypot booking ignored");
+    return { ok: true, reference: "EC-00000" };
+  }
+  if (!data.startTime || !data.name || !data.phone || !data.email || !data.address) {
+    return { ok: false, error: "missing_fields" };
+  }
+  var badInput = validateBookingInput(data);
+  if (badInput) return { ok: false, error: badInput };
+  var rate = bookingRateExceeded();
+  if (rate) {
+    if (rate === true) notifyOwner("Bookings paused: unusual number in the last hour",
+      "More than " + MAX_BOOKINGS_PER_HOUR + " bookings (or " + MAX_ATTEMPTS_PER_HOUR + " booking attempts) arrived within an hour, " +
+      "so new ones are being turned away for now (customers see the WhatsApp fallback). " +
+      "Check your calendar for fake bookings. It resets on its own within the hour.");
+    return { ok: false, error: "busy" };
+  }
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (lockErr) {
+    return { ok: false, error: "busy" };
+  }
+  try {
+    var result = createBookingLocked_(data);
+    if (result && result.ok) countBooking();
+    return result;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Server-side checks on what the browser sent. The page checks these too,
+// but anyone can post straight to this script. The important one is the
+// email: exactly one normal address, so a booking can never be used to
+// send the confirmation email to a list of other people.
+var EMAIL_PATTERN = /^[^\s@,;:<>()\[\]"\\]+@[^\s@,;:<>()\[\]"'\\]+\.[A-Za-z]{2,}$/;
+
+function validateBookingInput(data) {
+  var str = function (v) { return typeof v === "string" ? v.trim() : (v === undefined || v === null ? "" : String(v)); };
+  data.email = str(data.email);
+  data.name = str(data.name);
+  data.phone = str(data.phone);
+  data.address = str(data.address);
+  if (data.email.length > 254 || !EMAIL_PATTERN.test(data.email)) return "bad_details";
+  if (!data.name || data.name.length > 100) return "bad_details";
+  // Phone: free text is fine ("07700 900000, evenings"), as long as there's a number in it.
+  if (data.phone.length > 40 || data.phone.replace(/\D/g, "").length < 7) return "bad_details";
+  if (!data.address || data.address.length > 300) return "bad_details";
+  var limits = { postcode: 12, businessName: 120, siteContactName: 100, siteContactPhone: 40, agencyId: 60, referralCode: 40, slotLabel: 80 };
+  for (var k in limits) {
+    if (data[k] !== undefined && data[k] !== null && String(data[k]).length > limits[k]) return "bad_details";
+  }
+  if (Array.isArray(data.lineItems) && data.lineItems.length > 40) return "bad_items";
+  if (data.items && String(data.items).length > 2000) return "bad_items";
+  return null;
+}
+
+function createBookingLocked_(data) {
+  // The agent/landlord form (agents.html) needs a business name, plus
+  // either a named contact on site or the agent choosing to arrange access
+  // with us at least 24 hours before. Enforced here too, since both forms
+  // POST to this same endpoint.
+  if (data.channel === "Agent/Landlord") {
+    if (!data.businessName) return { ok: false, error: "missing_fields" };
+    if (!data.accessArrange && (!data.siteContactName || !data.siteContactPhone)) {
+      return { ok: false, error: "missing_fields" };
+    }
+  }
+
+  // Postcode must be inside the service area (service-area.js on the site).
+  var area = checkServiceArea(data);
+  if (!area.ok) return { ok: false, error: area.error };
+  data.areaUnchecked = !area.verified;
+
+  var start = new Date(data.startTime);
+  if (!isOfferableSlot(start)) {
+    return { ok: false, error: "slot_taken" };
+  }
+  var end = new Date(start.getTime() + SLOT_MINS * 60000);
+  var cal = CalendarApp.getDefaultCalendar();
+
+  // Re-price from the live price list. The browser's own items/total/time
+  // are only used if the price list can't be read at all, and you're told.
+  var priced = priceBooking(data);
+  if (!priced.ok) return { ok: false, error: priced.error };
+  data.items = priced.items;
+  data.total = priced.total;
+  data.estTime = priced.estTime;
+
+  // Re-check the slot is still free — someone else may have grabbed it
+  // between the site loading the slot list and this request arriving.
+  var clashes = cal.getEvents(start, end);
+  if (clashes.length > 0) {
+    return { ok: false, error: "slot_taken" };
+  }
+
+  var reference = newBookingReference();
+  var jobToken = newJobToken();
+  var title = bookingEventTitle_(data);
+  // "Job link" is for Niall, not the customer — it's only ever written into
+  // this calendar event's own description, never into the customer-facing
+  // confirmation email. It opens this job in the private admin app (Google
+  // sign-in required), where he gets the signature and marks it done.
+  var jobLink = adminJobLink(jobToken, reference);
+  var description = bookingEventDescription_(data, reference, jobLink);
+
+  cal.createEvent(title, start, end, {
+    description: description,
+    location: data.address
+  });
+
+  // Update the cached slot list right away so this slot stops being offered
+  // to the next visitor immediately, rather than waiting for the next
+  // scheduled refresh (up to 10 minutes away). Wrapped defensively: a
+  // problem refreshing the cache should never fail an otherwise-successful
+  // booking — the booking above has already been created either way.
+  try {
+    refreshSlotsCache();
+  } catch (cacheErr) {
+    console.error("Cache refresh after booking failed: " + cacheErr);
+  }
+
+  try {
+    var slotLabel = data.slotLabel || Utilities.formatDate(start, TIMEZONE, "EEE d MMM 'at' h:mma");
+    sendBookingConfirmation_(data, reference, slotLabel);
+  } catch (mailErr) {
+    // The calendar event is already created at this point, which is what
+    // actually matters — a failed confirmation email shouldn't fail the
+    // whole booking. Logged so it's visible in Apps Script's execution log.
+    console.error("Confirmation email failed: " + mailErr);
+    notifyOwner("Confirmation email failed for " + reference,
+      "The booking is in your calendar, but the customer's confirmation email didn't send (" + mailErr + "). " +
+      "Their email was entered as: " + data.email + ". Worth checking it and contacting them directly.");
+  }
+
+  try {
+    var recordedSlotLabel = data.slotLabel || Utilities.formatDate(start, TIMEZONE, "EEE d MMM 'at' h:mma");
+    appendCustomerRow(data, reference, recordedSlotLabel, jobToken);
+  } catch (sheetErr) {
+    // Same principle as the email above: the calendar event is already
+    // created, so a problem writing to the customer sheet should never fail
+    // the booking itself. Logged so it's visible in Apps Script's execution
+    // log if it ever needs investigating.
+    console.error("Customer sheet write failed: " + sheetErr);
+    notifyOwner("Customer sheet not updated for " + reference,
+      "The booking is in your calendar, but it couldn't be added to the customer sheet (" + sheetErr + "), " +
+      "so it won't appear in the admin app. Add the row by hand from the calendar event.");
+  }
+
+  try {
+    sendNewBookingAlert(data, reference, jobToken, start, priced);
+  } catch (alertErr) {
+    console.error("New booking alert failed: " + alertErr);
+  }
+
+  return { ok: true, reference: reference };
+}
+
+
+// ---- Shared by website bookings and bookings made in the admin app ----
+
+function bookingEventTitle_(d) {
+  return d.channel === "Agent/Landlord"
+    ? "Clean (Agent): " + d.businessName + " (" + d.total + ")"
+    : "Clean: " + d.name + " (" + d.total + ")";
+}
+
+// The calendar event's description. Always starts "Reference: EC-…", which
+// is how every other part of the system finds the booking again.
+function bookingEventDescription_(d, reference, jobLink) {
+  var lines = [
+    "Reference: " + reference,
+    "What needs cleaning: " + d.items,
+    "Est. time: " + (d.estTime || "not specified"),
+    "Total: " + d.total,
+    "Phone: " + d.phone,
+    "Email: " + d.email,
+    "Payment: " + d.payment
+  ];
+  // Agent/landlord-only fields: the person on site usually isn't the
+  // person who made the booking.
+  if (d.channel === "Agent/Landlord") {
+    lines.push("Business: " + d.businessName);
+    lines.push(d.accessArrange
+      ? "Access: AGENT TO ARRANGE, they'll get in touch at least 24 hours before (no one named on site)"
+      : "Site contact: " + d.siteContactName + " (" + d.siteContactPhone + ")");
+    if (d.agencyId) lines.push("Agent/Agency ID: " + d.agencyId);
+  }
+  if (d.referralCode) lines.push("Referral/offer code: " + d.referralCode);
+  if (d.notes) lines.push("Notes: " + d.notes);
+  if (d.bookedVia === "Admin app") lines.push("Booked via: admin app");
+  lines.push(JOB_LINK_LABEL + jobLink);
+  return lines.join("\n");
+}
+
+function sendBookingConfirmation_(data, reference, slotLabel) {
+  var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" +
+    encodeURIComponent("Hi EasyClean Somerset, I need to change my booking. Ref: " + reference);
+  // Plain-text fallback — shown by the small number of mail clients that
+  // don't render HTML at all, and used by spam filters that inspect it.
+  // Deliberately kept simple; all the branding lives in the HTML version.
+  var textBody = "Hi " + data.name + ",\n\n" +
+    "You're booked in with EasyClean Somerset.\n\n" +
+    "When: " + slotLabel + "\n" +
+    "What: " + data.items + "\n" +
+    "Total: " + data.total + " (" + data.payment + ")\n" +
+    "Where: " + data.address + "\n" +
+    (data.channel === "Agent/Landlord" ? "Access: " + accessEmailText(data) + "\n" : "") + "\n" +
+    "Reference: " + reference + ". Keep this handy if you need to get in touch.\n\n" +
+    "Need to change anything? Just reply to this email or WhatsApp us: " + waLink + "\n\n" +
+    "Thanks,\nEasyClean Somerset";
+
+  var htmlBody = buildConfirmationEmailHtml({
+    name: data.name,
+    slotLabel: slotLabel,
+    items: data.items,
+    total: data.total,
+    payment: data.payment,
+    address: data.address,
+    reference: reference,
+    waLink: waLink,
+    access: data.channel === "Agent/Landlord" ? accessEmailText(data) : ""
+  });
+
+  GmailApp.sendEmail(data.email, "Booking confirmed: " + slotLabel, textBody, {
+    htmlBody: htmlBody,
+    name: "EasyClean Somerset"
+  });
+}
+
+// Builds the branded HTML confirmation email. Written the way marketing
+// email HTML has to be written to survive real inboxes: everything laid
+// out with <table>s and every style attribute inline, rather than a
+// <style> block or CSS classes — Gmail, Outlook and a lot of mobile mail
+// apps strip or ignore both of those, and inline styles are the one thing
+// every client reliably keeps. Fonts fall back to plain system fonts
+// (Arial/Helvetica, Courier New) rather than depending on the site's
+// Google Fonts loading inside an email client, which is unreliable —
+// the colours, spacing and layout carry the branding here, not the exact
+// typeface. Deliberately avoids anything Outlook's rendering engine mangles
+// (CSS gradients, transforms/rotation, box-shadow) — the "premium" feel
+// comes from generous whitespace, a restrained accent colour, and a couple
+// of small bespoke details (the monogram, the reference stub) rather than
+// effects that only work in modern clients.
+function buildConfirmationEmailHtml(d) {
+  var esc = escHtml;
+
+  var INK = "#12232B";
+  var INK_SOFT = "#2A3D46";
+  var TEAL = "#0E7C86";        // the site's actual --teal token (light mode, what most visitors see)
+  var TEAL_DEEP = "#0A5960";   // the site's --teal-deep token
+  var TEAL_TINT = "#E4F0F0";
+  var PAPER = "#F5F7F6";
+  var SURFACE = "#FFFFFF";
+  var LINE = "#DCE3E2";
+  var SLATE = "#5C6F73";
+  var STAMP = "#B5461E";
+  var ON_INK = "#F5F7F6";
+  var SANS = "Arial,Helvetica,sans-serif";
+  var LOGO_URL = "https://easycleansomerset.co.uk/apple-touch-icon.png"; // the real brand-kit icon mark, same file the site's own favicon uses
+
+  // Stacked label-above-value rather than side-by-side label/value: a
+  // side-by-side layout looks fine for short fields like "Total", but
+  // "What" (a multi-item list) and "Where" (a full address) can run long,
+  // and a right-aligned value wraps raggedly against a narrow mail-client
+  // viewport. Stacking keeps every field left-aligned and readable
+  // regardless of how much text is in it.
+  function detailRow(label, value, isLast) {
+    var borderStyle = isLast ? "" : "border-bottom:1px solid " + LINE + ";";
+    return (
+      '<tr><td style="padding:16px 0;' + borderStyle + '">' +
+        '<div style="font-family:' + SANS + ';font-weight:bold;font-size:10.5px;letter-spacing:0.12em;text-transform:uppercase;color:' + SLATE + ';margin-bottom:5px;">' + label + '</div>' +
+        '<div style="font-family:' + SANS + ';font-size:15.5px;font-weight:600;color:' + INK + ';line-height:1.5;">' + value + '</div>' +
+      '</td></tr>'
+    );
+  }
+
+  return (
+    '<div style="background:' + PAPER + ';padding:40px 16px;">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">' +
+
+        // Thin top accent bar — a small "letterhead" touch above the header
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+
+        // Header band — the real brand-kit icon mark (same PNG the site's own
+        // favicon uses, hosted at the live domain) + wordmark lockup, plus a
+        // small tagline. Previously an invented CSS-drawn "ES" box in a
+        // monospace font — replaced with the actual logo image once one
+        // existed, so the email matches the real thing pixel-for-pixel
+        // instead of approximating it.
+        '<tr><td style="background:' + INK + ';padding:36px 28px 30px;text-align:center;">' +
+          '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">' +
+            '<tr>' +
+              '<td style="width:44px;height:44px;vertical-align:middle;">' +
+                '<img src="' + LOGO_URL + '" width="44" height="44" alt="EasyClean Somerset" style="display:block;width:44px;height:44px;" />' +
+              '</td>' +
+              '<td style="width:14px;font-size:14px;">&nbsp;</td>' +
+              '<td style="text-align:left;vertical-align:middle;">' +
+                '<span style="font-family:' + SANS + ';font-weight:800;font-size:21px;letter-spacing:0.01em;text-transform:uppercase;color:' + ON_INK + ';">Easy<span style="color:' + TEAL + ';">Clean</span> Somerset</span>' +
+              '</td>' +
+            '</tr>' +
+          '</table>' +
+          '<div style="margin-top:16px;font-family:' + SANS + ';font-weight:bold;font-size:10px;letter-spacing:0.18em;text-transform:uppercase;color:' + TEAL + ';">Carpet &middot; Upholstery &middot; Mattress Cleaning</div>' +
+        '</td></tr>' +
+
+        // Body card
+        '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:36px 28px 8px;">' +
+
+          // Eyebrow tag + heading — the tag now mirrors the site's own
+          // .offer-tag pill exactly: solid teal fill, on-ink text, fully
+          // rounded, mono uppercase, rather than an invented flat tint box.
+          '<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:18px;"><tr><td style="background:' + TEAL + ';padding:5px 12px;border-radius:20px;">' +
+            '<span style="font-family:' + SANS + ';font-weight:bold;font-size:11.5px;letter-spacing:0.08em;text-transform:uppercase;color:' + ON_INK + ';">Booking Confirmed</span>' +
+          '</td></tr></table>' +
+          '<p style="margin:0 0 6px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Hi ' + esc(d.name) + ',</p>' +
+          '<h1 style="margin:0 0 6px;font-family:' + SANS + ';font-weight:800;font-size:27px;letter-spacing:-0.01em;color:' + INK + ';">You&#8217;re booked in</h1>' +
+          '<div style="width:36px;height:3px;background:' + STAMP + ';margin:0 0 18px;font-size:3px;line-height:3px;">&nbsp;</div>' +
+          '<p style="margin:0 0 28px;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + SLATE + ';">Thanks for booking with EasyClean Somerset. Here&#8217;s everything for your appointment.</p>' +
+
+          // Reference stub — now built on the site's own card language
+          // (.path / .seal: a bordered card with a coloured top accent and
+          // rounded corners) instead of an invented left-side stripe. The
+          // separate "Confirmed" badge was dropped: with the pill above
+          // already saying "Booking Confirmed", repeating it here was
+          // redundant clutter rather than a second useful signal.
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ' + LINE + ';border-top:3px solid ' + TEAL + ';border-radius:4px;margin-bottom:28px;">' +
+            '<tr><td style="padding:16px 18px;">' +
+              '<div style="font-family:' + SANS + ';font-weight:bold;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:' + SLATE + ';margin-bottom:4px;">Reference</div>' +
+              '<div style="font-family:' + SANS + ';font-size:17px;font-weight:bold;letter-spacing:0.01em;color:' + TEAL_DEEP + ';">' + esc(d.reference) + '</div>' +
+            '</td></tr>' +
+          '</table>' +
+
+          // Details
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">' +
+            detailRow("When", esc(d.slotLabel), false) +
+            detailRow("What", esc(d.items), false) +
+            detailRow("Total", esc(d.total) + " &middot; " + esc(d.payment), false) +
+            detailRow("Where", esc(d.address), !d.access) +
+            (d.access ? detailRow("Access", esc(d.access), true) : "") +
+          '</table>' +
+
+          // Prep checklist — added after a customer asked what they should
+          // do before the visit to make sure everything's accessible. The
+          // "strip the bedding" line only shows when the booking actually
+          // includes a mattress, checked against the plain-text items list
+          // built client-side (e.g. "1x Mattress (single/double): £40").
+          prepChecklistHtml(d.items) +
+
+        '</td></tr>' +
+
+        // CTA
+        '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:20px 28px 36px;text-align:center;">' +
+          '<p style="margin:0 0 16px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Need to change anything? Just reply to this email, or message us directly:</p>' +
+          '<a href="' + d.waLink + '" style="display:inline-block;background:' + TEAL + ';color:' + ON_INK + ';font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;text-decoration:none;padding:12px 24px;border-radius:3px;">WhatsApp us</a>' +
+        '</td></tr>' +
+
+        // Footer
+        '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:24px 28px;text-align:center;">' +
+          '<div style="font-family:' + SANS + ';font-weight:800;font-size:13px;letter-spacing:0.02em;text-transform:uppercase;color:' + INK_SOFT + ';margin-bottom:6px;">EasyClean Somerset</div>' +
+          '<p style="margin:0 0 10px;font-family:' + SANS + ';font-size:12px;line-height:1.6;color:' + SLATE + ';">Carpet, upholstery &amp; mattress cleaning across Somerset &amp; BANES</p>' +
+          '<a href="https://easycleansomerset.co.uk" style="font-family:' + SANS + ';font-size:12px;font-weight:700;color:' + TEAL_DEEP + ';text-decoration:none;">easycleansomerset.co.uk</a>' +
+          '<span style="font-family:' + SANS + ';font-size:12px;color:' + LINE + ';padding:0 8px;">&middot;</span>' +
+          '<a href="https://easycleansomerset.co.uk/terms.html" style="font-family:' + SANS + ';font-size:12px;font-weight:700;color:' + TEAL_DEEP + ';text-decoration:none;">Terms &amp; Conditions</a>' +
+        '</td></tr>' +
+
+        // Thin bottom accent bar — bookends the top one
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+
+      '</table>' +
+    '</div>'
+  );
+}
+
+// ============================================================
+// Morning-of appointment reminders
+// ============================================================
+
+/**
+ * Run this ONCE, the same way as setUpAutoRefresh/setUpCustomerSheet above:
+ * pick "setUpDailyReminders" from the function dropdown and click Run.
+ * Creates a trigger that runs sendDayOfReminders() once a day, in the
+ * REMINDER_HOUR-to-(REMINDER_HOUR+1) window (Apps Script time triggers run
+ * sometime within the hour you give them, not at an exact minute — fine for
+ * a morning reminder). Safe to run again later; it clears any previous
+ * version of this trigger first so you never end up with two.
+ */
+function setUpDailyReminders() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === "sendDayOfReminders") ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger("sendDayOfReminders").timeBased().everyDays(1).atHour(REMINDER_HOUR).create();
+}
+
+// Runs once a day (see setUpDailyReminders above). Looks at every calendar
+// event booked in for today, matches each one back to its full details in
+// the customer sheet by reference, and emails that customer a reminder.
+// Each booking is handled in its own try/catch — one bad row (or a customer
+// whose email somehow didn't save) should never stop the rest of today's
+// reminders from going out.
+// "Booking time" as readable text. Google Sheets sometimes turns the label
+// written at booking into a real date, which would print as a long
+// computer-style date in an email, so format it when that has happened.
+function bookingTimeText(v) {
+  var val = v["Booking time"];
+  if (val instanceof Date && !isNaN(val.getTime())) return fmtWhen(val);
+  return String(val || "");
+}
+
+function sendDayOfReminders() {
+  // Also runs the day-before reminders and, on Mondays, the unpaid digest,
+  // from this same daily trigger (no extra setup needed). Each part is
+  // separate so one failing never stops the others.
+  try { sendDayBeforeReminders(); } catch (err) { console.error("Day-before reminders failed: " + err); }
+  try {
+    if (Utilities.formatDate(new Date(), TIMEZONE, "u") === "1") sendUnpaidDigest();
+  } catch (err) { console.error("Unpaid digest failed: " + err); }
+  // Today's bookings, with their real start time from the calendar (so a
+  // job dragged to a new time shows the new time). Skips cancelled and
+  // completed ones, and anything already reminded today.
+  var sheet = null, header = null;
+  getBookingReferencesForDay(new Date()).forEach(function (item) {
+    try {
+      var row = findBookingRow(item.ref);
+      if (!row || !row.values.Email) return; // nothing to send to, skip
+      var v = row.values;
+      if (v["Cancelled at"] || v["Completed at"]) return;
+      if (v["Day-of reminder sent"] instanceof Date &&
+          Utilities.formatDate(v["Day-of reminder sent"], TIMEZONE, "yyyy-MM-dd") === Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd")) return;
+      sendReminderEmail(v, item.start);
+      if (!sheet) { sheet = getCustomerSheet(); header = ensureColumns(sheet, ["Day-of reminder sent"]); }
+      sheet.getRange(row.rowIndex, header.indexOf("Day-of reminder sent") + 1).setValue(new Date());
+    } catch (err) {
+      console.error("Reminder failed for " + item.ref + ": " + err);
+    }
+  });
+}
+
+function getBookingReferencesForDay(day) {
+  var refs = [];
+  CalendarApp.getDefaultCalendar().getEventsForDay(day).forEach(function (ev) {
+    var ref = referenceFromEvent(ev);
+    if (ref) refs.push({ ref: ref, start: ev.getStartTime ? ev.getStartTime() : null });
+  });
+  return refs;
+}
+
+// Day-before reminder: prep checklist, and an access nudge for agent
+// bookings where the agent is arranging access. Skips bookings made in the
+// last 18 hours (their confirmation email is still fresh), cancelled or
+// completed ones, and anything already reminded (so a re-run never doubles up).
+function sendDayBeforeReminders() {
+  var tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  var sheet = null, header = null;
+  getBookingReferencesForDay(tomorrow).forEach(function (item) {
+    try {
+      var row = findBookingRow(item.ref);
+      if (!row) return;
+      var v = row.values;
+      if (!v.Email || v["Cancelled at"] || v["Completed at"] || v["Day-before reminder sent"]) return;
+      if (v.Timestamp instanceof Date && Date.now() - v.Timestamp.getTime() < 18 * 60 * 60 * 1000) return;
+      sendDayBeforeEmail(v, item.start);
+      if (!sheet) { sheet = getCustomerSheet(); header = ensureColumns(sheet, ["Day-before reminder sent"]); }
+      sheet.getRange(row.rowIndex, header.indexOf("Day-before reminder sent") + 1).setValue(new Date());
+    } catch (err) {
+      console.error("Day-before reminder failed for " + item.ref + ": " + err);
+    }
+  });
+}
+
+function sendDayBeforeEmail(v, start) {
+  var isAgent = v.Channel === "Agent/Landlord";
+  var name = isAgent ? (v.Name || v["Business name"]) : v.Name;
+  var accessNudge = isAgent && /^Agent arranging/.test(String(v.Access || ""));
+  var when = start ? fmtWhen(start) : bookingTimeText(v);
+  var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" +
+    encodeURIComponent("Hi EasyClean Somerset, about tomorrow's booking. Ref: " + v.Reference);
+  var textBody = "Hi " + name + ",\n\n" +
+    "Just a reminder, we're booked in for tomorrow.\n\n" +
+    "When: " + when + "\nWhat: " + v.Items + "\nWhere: " + v.Address + "\nReference: " + v.Reference + "\n\n" +
+    (accessNudge ? "Access: you chose to arrange access with us. If you haven't told us yet how we'll get in (keys, a lockbox code or the tenant's details), please reply or WhatsApp us today.\n\n" : "") +
+    "Getting ready: clear small items off the floor, keep pets in another room, and clear a path from the door. A plug socket and water tap nearby helps." +
+    (String(v.Items).indexOf("Mattress") !== -1 ? " Please strip the bedding beforehand." : "") +
+    "\n\nNeed to change anything? Reply to this email or WhatsApp us: " + waLink + "\n\nSee you tomorrow,\nEasyClean Somerset";
+  GmailApp.sendEmail(v.Email, "Reminder: we're cleaning for you tomorrow", textBody, {
+    htmlBody: buildReminderEmailHtml({
+      dayBefore: true, accessNudge: accessNudge,
+      name: name, slotLabel: when, items: v.Items, total: v.Total, payment: v["Payment method"],
+      address: v.Address, reference: v.Reference, waLink: waLink,
+      access: isAgent ? v.Access : ""
+    }),
+    name: "EasyClean Somerset"
+  });
+}
+
+function sendReminderEmail(v, start) {
+  var when = start ? fmtWhen(start) : bookingTimeText(v);
+  var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" +
+    encodeURIComponent("Hi EasyClean Somerset, about today's booking. Ref: " + v.Reference);
+  var textBody = "Hi " + v.Name + ",\n\n" +
+    "Quick reminder, we've got you booked in for today.\n\n" +
+    "When: " + when + "\n" +
+    "What: " + v.Items + "\n" +
+    "Total: " + v.Total + " (" + v["Payment method"] + ")\n" +
+    "Where: " + v.Address + "\n\n" +
+    "Reference: " + v.Reference + "\n\n" +
+    "Need to change anything? Just reply to this email or WhatsApp us: " + waLink + "\n\n" +
+    "See you soon,\nEasyClean Somerset";
+
+  GmailApp.sendEmail(v.Email, "Reminder: we're cleaning for you today", textBody, {
+    htmlBody: buildReminderEmailHtml({
+      name: v.Name,
+      slotLabel: when,
+      items: v.Items,
+      total: v.Total,
+      payment: v["Payment method"],
+      address: v.Address,
+      reference: v.Reference,
+      waLink: waLink
+    }),
+    name: "EasyClean Somerset"
+  });
+}
+
+// "Getting ready for your visit" box, shared by the confirmation email and
+// the day-before reminder. The "strip the bedding" line only shows when the
+// booking includes a mattress.
+function prepChecklistHtml(items) {
+  var INK_SOFT = "#2A3D46", PAPER = "#F5F7F6", LINE = "#DCE3E2", SLATE = "#5C6F73";
+  var SANS = "Arial,Helvetica,sans-serif";
+  return '<div style="border:1px solid ' + LINE + ';border-radius:4px;padding:18px 20px;margin:24px 0 4px;background:' + PAPER + ';">' +
+    '<div style="font-family:' + SANS + ';font-weight:bold;font-size:10.5px;letter-spacing:0.12em;text-transform:uppercase;color:' + SLATE + ';margin-bottom:10px;">Getting ready for your visit</div>' +
+    '<ul style="margin:0;padding-left:18px;font-family:' + SANS + ';font-size:13.5px;line-height:1.6;color:' + INK_SOFT + ';">' +
+      '<li style="margin-bottom:6px;">Clear the floor of small items, toys, shoes, cables, so nothing gets caught up or damaged while we work.</li>' +
+      '<li style="margin-bottom:6px;">Keep pets in another room during the visit, safer for them and easier for us.</li>' +
+      '<li style="margin-bottom:6px;">Clear a path from the door to the room, and a nearby parking space if you can. A plug socket and water tap close by helps too.</li>' +
+      (String(items).indexOf("Mattress") !== -1 ?
+        '<li style="margin-bottom:6px;">Strip the bedding beforehand, sheets, protector, pillowcases.</li>' : '') +
+      '<li style="margin-bottom:6px;">Carpets and upholstery need a few hours to dry, worth planning around before we arrive.</li>' +
+      '<li style="margin-bottom:0;">Got a specific stain or area you&#8217;d like extra attention on? Reply to this email or message us and we&#8217;ll come prepared.</li>' +
+    '</ul>' +
+  '</div>';
+}
+
+// Same visual language as buildConfirmationEmailHtml (same colours, same
+// table-based inline-style approach for the same reason: Gmail/Outlook
+// reliability), just a shorter body. Used for the morning-of reminder and,
+// with d.dayBefore, the day-before reminder (adds the prep checklist and,
+// for "agent arranging access" bookings, an access nudge).
+function buildReminderEmailHtml(d) {
+  var esc = escHtml;
+  var INK = "#12232B", TEAL = "#0E7C86", TEAL_DEEP = "#0A5960", PAPER = "#F5F7F6";
+  var SURFACE = "#FFFFFF", LINE = "#DCE3E2", SLATE = "#5C6F73", ON_INK = "#F5F7F6";
+  var SANS = "Arial,Helvetica,sans-serif";
+  var LOGO_URL = SITE_URL + "/apple-touch-icon.png";
+
+  function detailRow(label, value, isLast) {
+    var borderStyle = isLast ? "" : "border-bottom:1px solid " + LINE + ";";
+    return (
+      '<tr><td style="padding:14px 0;' + borderStyle + '">' +
+        '<div style="font-family:' + SANS + ';font-weight:bold;font-size:10.5px;letter-spacing:0.12em;text-transform:uppercase;color:' + SLATE + ';margin-bottom:5px;">' + label + '</div>' +
+        '<div style="font-family:' + SANS + ';font-size:15px;font-weight:600;color:' + INK + ';line-height:1.5;">' + value + '</div>' +
+      '</td></tr>'
+    );
+  }
+
+  return (
+    '<div style="background:' + PAPER + ';padding:40px 16px;">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">' +
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+        '<tr><td style="background:' + INK + ';padding:30px 28px 26px;text-align:center;">' +
+          '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">' +
+            '<tr>' +
+              '<td style="width:40px;height:40px;vertical-align:middle;">' +
+                '<img src="' + LOGO_URL + '" width="40" height="40" alt="EasyClean Somerset" style="display:block;width:40px;height:40px;" />' +
+              '</td>' +
+              '<td style="width:14px;font-size:14px;">&nbsp;</td>' +
+              '<td style="text-align:left;vertical-align:middle;">' +
+                '<span style="font-family:' + SANS + ';font-weight:800;font-size:19px;letter-spacing:0.01em;text-transform:uppercase;color:' + ON_INK + ';">Easy<span style="color:' + TEAL + ';">Clean</span> Somerset</span>' +
+              '</td>' +
+            '</tr>' +
+          '</table>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:32px 28px 8px;">' +
+          '<table role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:18px;"><tr><td style="background:' + TEAL + ';padding:5px 12px;border-radius:20px;">' +
+            '<span style="font-family:' + SANS + ';font-weight:bold;font-size:11.5px;letter-spacing:0.08em;text-transform:uppercase;color:' + ON_INK + ';">' + (d.dayBefore ? "Tomorrow&#8217;s Booking" : "Today&#8217;s Booking") + '</span>' +
+          '</td></tr></table>' +
+          '<p style="margin:0 0 6px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Hi ' + esc(d.name) + ',</p>' +
+          '<h1 style="margin:0 0 18px;font-family:' + SANS + ';font-weight:800;font-size:24px;letter-spacing:-0.01em;color:' + INK + ';">' + (d.dayBefore ? "See you tomorrow" : "We&#8217;re cleaning for you today") + '</h1>' +
+          (d.accessNudge ? '<p style="margin:0 0 18px;padding:12px 14px;border-left:3px solid #B5461E;background:' + PAPER + ';font-family:' + SANS + ';font-size:14px;line-height:1.55;color:' + INK + ';"><strong>Access:</strong> you chose to arrange access with us. If you haven&#8217;t told us yet how we&#8217;ll get in (keys to collect, a lockbox code or the tenant&#8217;s details), please reply or WhatsApp us today.</p>' : '') +
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">' +
+            detailRow("When", esc(d.slotLabel), false) +
+            detailRow("What", esc(d.items), false) +
+            detailRow("Total", esc(d.total) + " &middot; " + esc(d.payment), false) +
+            detailRow("Where", esc(d.address), !d.access) +
+            (d.access ? detailRow("Access", esc(d.access), true) : "") +
+          '</table>' +
+          (d.dayBefore ? prepChecklistHtml(d.items) : '') +
+        '</td></tr>' +
+        '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:20px 28px 32px;text-align:center;">' +
+          '<p style="margin:0 0 16px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Need to change anything? Just reply to this email, or message us directly:</p>' +
+          '<a href="' + d.waLink + '" style="display:inline-block;background:' + TEAL + ';color:' + ON_INK + ';font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;text-decoration:none;padding:12px 24px;border-radius:3px;">WhatsApp us</a>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:22px 28px;text-align:center;">' +
+          '<div style="font-family:' + SANS + ';font-weight:800;font-size:12.5px;letter-spacing:0.02em;text-transform:uppercase;color:' + SLATE + ';">EasyClean Somerset &middot; Ref ' + esc(d.reference) + '</div>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+      '</table>' +
+    '</div>'
+  );
+}
+
+// ============================================================
+// On-site signature capture, thank-you email, invoice
+// ============================================================
+
+// ---- Customer-facing signing link (public) ----
+// What job-complete.html shows a customer who's been sent a link to sign
+// off their own job. Looked up by the booking's secret token only; the
+// short EC- reference is never accepted here, so there's nothing to guess.
+// Deliberately minimal: no phone numbers or email addresses.
+function getPublicJob(token) {
+  if (!isPlausibleToken(token)) return { ok: false, error: "not_found" };
+  var row = findBookingByToken(token);
+  if (!row) return { ok: false, error: "not_found" };
+  var v = row.values;
+  return {
+    ok: true,
+    reference: v.Reference,
+    name: v.Channel === "Agent/Landlord" ? v["Business name"] : v.Name,
+    address: v.Address,
+    items: v.Items,
+    total: v.Total,
+    alreadyCompleted: !!v["Completed at"],
+    cancelled: !!v["Cancelled at"]
+  };
+}
+
+// A customer signing their own job from the link. Signature required: the
+// "complete without a signature" option is Niall's alone, in the admin app.
+function completeJobPublic(data) {
+  if (!isPlausibleToken(data.token)) return { ok: false, error: "not_found" };
+  var sig = String(data.signature || "");
+  if (sig.indexOf("data:image/png;base64,") !== 0 || sig.length > 1500000) {
+    return { ok: false, error: "missing_fields" };
+  }
+  return completeJob({ token: data.token, signature: sig });
+}
+
+function toWhatsAppNumber(ukPhone) {
+  if (!ukPhone) return "";
+  var digits = phoneText(ukPhone).replace(/\D/g, "");
+  if (!digits) return "";
+  if (digits.charAt(0) === "0") digits = "44" + digits.slice(1);
+  else if (digits.length === 10) digits = "44" + digits; // UK number stored without its 0
+  return digits;
+}
+
+// The WhatsApp equivalent needs no backend call (no paid WhatsApp API): the
+// admin app builds a wa.me link Niall taps and sends himself.
+// Emails the customer (or, for agent bookings, whoever booked) a link to
+// sign the job off themselves. Admin app only.
+function sendSigningLinkForRow(row) {
+  var v = row.values;
+  if (v["Completed at"]) return { ok: false, error: "already_completed" };
+  if (!v.Email) return { ok: false, error: "no_email" };
+  var customerName = v.Channel === "Agent/Landlord" ? (v.Name || v["Business name"]) : v.Name;
+  var link = publicSigningLink(v["Job token"]);
+  var textBody = "Hi " + customerName + ",\n\n" +
+    "Could you confirm today's clean is all done? Tap the link below to have a look and pop your signature on it:\n\n" +
+    link + "\n\n" +
+    "Thanks,\nEasyClean Somerset";
+
+  GmailApp.sendEmail(v.Email, "Please confirm your clean is complete", textBody, {
+    htmlBody: buildSigningLinkEmailHtml({ name: customerName, link: link, reference: v.Reference }),
+    name: "EasyClean Somerset"
+  });
+  return { ok: true };
+}
+
+function buildSigningLinkEmailHtml(d) {
+  var esc = escHtml;
+  var INK = "#12232B", TEAL = "#0E7C86", PAPER = "#F5F7F6", SURFACE = "#FFFFFF";
+  var LINE = "#DCE3E2", SLATE = "#5C6F73", ON_INK = "#F5F7F6";
+  var SANS = "Arial,Helvetica,sans-serif";
+  var LOGO_URL = SITE_URL + "/apple-touch-icon.png";
+
+  return (
+    '<div style="background:' + PAPER + ';padding:40px 16px;">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">' +
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+        '<tr><td style="background:' + INK + ';padding:30px 28px 26px;text-align:center;">' +
+          '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">' +
+            '<tr>' +
+              '<td style="width:40px;height:40px;vertical-align:middle;">' +
+                '<img src="' + LOGO_URL + '" width="40" height="40" alt="EasyClean Somerset" style="display:block;width:40px;height:40px;" />' +
+              '</td>' +
+              '<td style="width:14px;font-size:14px;">&nbsp;</td>' +
+              '<td style="text-align:left;vertical-align:middle;">' +
+                '<span style="font-family:' + SANS + ';font-weight:800;font-size:19px;letter-spacing:0.01em;text-transform:uppercase;color:' + ON_INK + ';">Easy<span style="color:' + TEAL + ';">Clean</span> Somerset</span>' +
+              '</td>' +
+            '</tr>' +
+          '</table>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:32px 28px 30px;text-align:center;">' +
+          '<p style="margin:0 0 6px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Hi ' + esc(d.name) + ',</p>' +
+          '<h1 style="margin:0 0 18px;font-family:' + SANS + ';font-weight:800;font-size:24px;letter-spacing:-0.01em;color:' + INK + ';">Could you confirm today&#8217;s clean is done?</h1>' +
+          '<p style="margin:0 0 24px;font-family:' + SANS + ';font-size:14.5px;line-height:1.6;color:' + SLATE + ';">Tap the button below to have a quick look and pop your signature on it, it only takes a moment.</p>' +
+          '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;"><tr><td style="background:' + TEAL + ';border-radius:3px;">' +
+            '<a href="' + d.link + '" style="display:inline-block;padding:13px 26px;font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;color:' + ON_INK + ';text-decoration:none;">Confirm the job&#8217;s done</a>' +
+          '</td></tr></table>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:22px 28px;text-align:center;">' +
+          '<div style="font-family:' + SANS + ';font-weight:800;font-size:12.5px;letter-spacing:0.02em;text-transform:uppercase;color:' + SLATE + ';">EasyClean Somerset &middot; Ref ' + esc(d.reference) + '</div>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+      '</table>' +
+    '</div>'
+  );
+}
+
+// Called by job-complete.html once a customer's signed on the pad (or
+// Niall's used the "customer not available to sign" fallback). Saves the
+// signature (when there is one), marks the sheet row done, generates a
+// numbered invoice PDF and emails it to the customer along with a
+// thank-you + review request. Guarded against being run twice for the same
+// booking (double-tap, page reloaded after already submitting) — the
+// second call just reports back that it's already done rather than
+// sending a second thank-you email and burning another invoice number.
+// Internal/admin entry point: finds the booking by its job token (preferred,
+// always unique) or, for older callers, by reference. The public website can
+// only reach this through completeJobPublic() below.
+function completeJob(data) {
+  if ((!data.token && !data.reference) || (!data.signature && !data.noSignature)) {
+    return { ok: false, error: "missing_fields" };
+  }
+  // One completion at a time, so a customer signing a remote link at the
+  // same moment Niall marks the job done can't produce two invoices.
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    return completeJobLocked_(data);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function completeJobLocked_(data) {
+  var row = data.token ? findBookingByToken(data.token) : findBookingRow(data.reference);
+  if (!row) return { ok: false, error: "not_found" };
+  if (row.values["Completed at"]) {
+    return { ok: true, alreadyCompleted: true };
+  }
+  if (row.values["Cancelled at"]) {
+    return { ok: false, error: "cancelled" };
+  }
+  var ref = row.values.Reference;
+
+  var signatureUrl = "";
+  if (data.signature) {
+    try {
+      signatureUrl = saveSignature(ref, data.signature);
+    } catch (err) {
+      // A signature that fails to save shouldn't stop the job being marked
+      // done and the customer being thanked — logged so it's visible in the
+      // execution log, but not fatal to the rest of this function.
+      console.error("Signature save failed for " + ref + ": " + err);
+    }
+  } else {
+    // No-signature path (empty property, key left out, customer declined).
+    // Recorded plainly in the same column a real signature link would sit
+    // in, rather than leaving it blank and indistinguishable from the
+    // storage silently failing.
+    signatureUrl = "No signature — " + (data.reason || "customer not available");
+  }
+
+  var invoiceNumber = nextInvoiceNumber(true); // already holding the script lock
+  var completedAt = new Date();
+  var v = row.values;
+  var inv = buildInvoiceContext(v, invoiceNumber, completedAt);
+
+  // Build each PDF once, then use the same file both for the Drive copy and
+  // the email attachment, so what's on file is exactly what was sent.
+  var invoiceBlob = null, completionBlob = null;
+  try {
+    invoiceBlob = buildInvoicePdfBlob(v, inv);
+  } catch (err) {
+    console.error("Invoice PDF failed for " + ref + ": " + err);
+    notifyOwner("Invoice PDF failed for " + ref, "The job is marked complete, but its invoice PDF couldn't be created (" + err + "), so the customer's email went without it. Send the invoice by hand.");
+  }
+  if (data.signature) {
+    try {
+      completionBlob = buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, data.signature);
+    } catch (err) {
+      console.error("Job completion PDF failed for " + ref + ": " + err);
+    }
+  }
+
+  // Drive copies. A failed save is logged, never fatal: the email below
+  // still carries both documents, and the sheet says the save didn't happen
+  // rather than leaving a blank that looks like nothing was ever generated.
+  var invoiceUrl = "", completionUrl = "";
+  if (invoiceBlob) {
+    try {
+      invoiceUrl = saveDocumentToDrive(INVOICES_FOLDER_NAME, completedAt, invoiceBlob);
+    } catch (err) {
+      invoiceUrl = "Not saved to Drive (see execution log)";
+      console.error("Invoice Drive save failed for " + ref + ": " + err);
+      notifyOwner("Invoice not saved to Drive for " + ref, "The invoice was emailed, but the Drive copy failed (" + err + "). The emailed copy is in your Sent folder.");
+    }
+  }
+  if (completionBlob) {
+    try {
+      completionUrl = saveDocumentToDrive(COMPLETIONS_FOLDER_NAME, completedAt, completionBlob);
+    } catch (err) {
+      completionUrl = "Not saved to Drive (see execution log)";
+      console.error("Completion Drive save failed for " + ref + ": " + err);
+    }
+  }
+
+  var sheet = getCustomerSheet();
+  var headerRow = ensureColumns(sheet, COMPLETION_COLUMNS);
+  var writes = {
+    "Completed at": completedAt,
+    "Signature link": signatureUrl,
+    "Invoice number": invoiceNumber,
+    "Invoice PDF": invoiceUrl,
+    "Completion PDF": completionUrl,
+    "Payment due": inv.paymentDue ? inv.dueDate : "",
+    // Cash/on-the-day payments are paid at completion. Agent bank transfers
+    // stay blank until Niall fills this in when the money arrives, which is
+    // what makes "who still owes me" a simple filter on this column.
+    "Paid on": inv.paymentDue ? "" : completedAt
+  };
+  Object.keys(writes).forEach(function (header) {
+    sheet.getRange(row.rowIndex, headerRow.indexOf(header) + 1).setValue(writes[header]);
+  });
+
+  try {
+    var attachments = [invoiceBlob, completionBlob].filter(function (b) { return b; });
+    // Bookings taken by phone may have no email; the invoice is still saved to Drive.
+    if (v.Email) sendThankYouEmail(v, inv, attachments);
+  } catch (err) {
+    // Same principle as everywhere else in this file: the job's already
+    // recorded as done and invoiced above, which is what actually matters —
+    // a failed email shouldn't undo that or fail this response.
+    console.error("Thank-you email failed for " + ref + ": " + err);
+    notifyOwner("Invoice email failed for " + ref, "The job is marked complete and invoiced, but the email to the customer didn't send (" + err + "). Send them the invoice from the Drive copy.");
+  }
+
+  return { ok: true, invoiceNumber: invoiceNumber };
+}
+
+// Adds any of `names` missing from the sheet's header row to the end of it,
+// and returns the (possibly extended) header row. Every read and write in
+// this file goes by header name, so appending at the end is always safe.
+function ensureColumns(sheet, names) {
+  var lastCol = sheet.getLastColumn();
+  var headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  names.forEach(function (name) {
+    if (headerRow.indexOf(name) === -1) {
+      sheet.getRange(1, headerRow.length + 1).setValue(name);
+      headerRow.push(name);
+    }
+  });
+  return headerRow;
+}
+
+// Everything the invoice PDF and the email need to know about which kind of
+// invoice this is. Two kinds:
+//   - Consumer, or an agent who paid cash on the day: a receipt, marked paid.
+//   - Agent paying by bank transfer: payment due in AGENT_PAYMENT_TERMS_DAYS,
+//     billed to the agency's office address (from the Agencies tab), with
+//     bank details and a payment reference.
+function buildInvoiceContext(v, invoiceNumber, completedAt) {
+  var isAgent = v.Channel === "Agent/Landlord";
+  // Homeowners paying by bank transfer pay on completion, so their invoice
+  // is a payment-due invoice too (due the same day), with bank details, and
+  // stays in the admin app's Unpaid list until marked paid.
+  var consumerBankTransfer = !isAgent && /bank transfer/i.test(String(v["Payment method"] || ""));
+  var paymentDue = (isAgent && v["Payment method"] !== "Cash") || consumerBankTransfer;
+  var ctx = {
+    isAgent: isAgent,
+    paymentDue: paymentDue,
+    dueOnCompletion: consumerBankTransfer,
+    invoiceNumber: invoiceNumber,
+    invoiceNo: formatInvoiceNo(invoiceNumber),
+    completedAt: completedAt,
+    billToName: isAgent ? v["Business name"] : v.Name,
+    billToAddress: isAgent ? "" : v.Address,
+    accountsEmail: ""
+  };
+  if (isAgent) {
+    try {
+      var agency = getAgencyBilling(v["Business name"]);
+      // The Agencies tab's spelling wins over however the agent typed their
+      // name on the form, so every invoice to one agency reads the same.
+      if (agency.businessName) ctx.billToName = agency.businessName;
+      ctx.billToAddress = agency.billingAddress;
+      ctx.accountsEmail = agency.accountsEmail;
+    } catch (err) {
+      console.error("Agencies tab lookup failed for " + v.Reference + ": " + err);
+    }
+  }
+  if (paymentDue) {
+    ctx.dueDate = consumerBankTransfer
+      ? new Date(completedAt.getTime())
+      : new Date(completedAt.getTime() + AGENT_PAYMENT_TERMS_DAYS * 24 * 60 * 60 * 1000);
+    ctx.bank = getBankDetails();
+  }
+  return ctx;
+}
+
+// Invoice numbers are stored as plain numbers in the sheet (1001, 1002...)
+// and shown on documents and used as the bank payment reference as INV-1001.
+function formatInvoiceNo(n) {
+  return "INV-" + n;
+}
+
+function getBankDetails() {
+  var props = PropertiesService.getScriptProperties();
+  var bank = {
+    accountName: props.getProperty(BANK_PROPERTY_KEYS.accountName) || "",
+    sortCode: props.getProperty(BANK_PROPERTY_KEYS.sortCode) || "",
+    accountNumber: props.getProperty(BANK_PROPERTY_KEYS.accountNumber) || ""
+  };
+  bank.complete = !!(bank.accountName && bank.sortCode && bank.accountNumber);
+  return bank;
+}
+
+// Looks an agency up by name (ignoring case and extra spaces) on the
+// Agencies tab, creating the tab if it doesn't exist yet and adding the
+// agency with blank details if it isn't listed, so Niall can see which ones
+// need a billing address. Returns { businessName, billingAddress, accountsEmail }.
+function getAgencyBilling(businessName) {
+  var none = { billingAddress: "", accountsEmail: "" };
+  var sheetId = PropertiesService.getScriptProperties().getProperty(CUSTOMER_SHEET_PROPERTY_KEY);
+  if (!sheetId || !businessName) return none;
+  var ss = SpreadsheetApp.openById(sheetId);
+  var tab = ss.getSheetByName(AGENCIES_SHEET_NAME);
+  if (!tab) {
+    tab = ss.insertSheet(AGENCIES_SHEET_NAME);
+    tab.getRange(1, 1, 1, AGENCIES_HEADERS.length).setValues([AGENCIES_HEADERS]).setFontWeight("bold");
+    tab.setFrozenRows(1);
+  }
+  var norm = function (s) { return String(s || "").trim().replace(/\s+/g, " ").toLowerCase(); };
+  var data = tab.getDataRange().getValues();
+  var header = data[0];
+  var nameCol = header.indexOf("Business name");
+  for (var i = 1; i < data.length; i++) {
+    if (norm(data[i][nameCol]) === norm(businessName)) {
+      var r = rowToObject(header, data[i]);
+      return {
+        businessName: String(r["Business name"] || "").trim(),
+        billingAddress: String(r["Billing address"] || "").trim(),
+        accountsEmail: String(r["Accounts email"] || "").trim()
+      };
+    }
+  }
+  tab.appendRow(header.map(function (h) { return h === "Business name" ? businessName : ""; }));
+  return none;
+}
+
+// Saves a generated PDF into <root folder>/<YYYY-MM>/ in Niall's Drive.
+// Kept private (unlike signature images, which are link-shared so the sheet
+// link opens from anywhere): these are only ever opened by Niall himself.
+function saveDocumentToDrive(rootName, date, blob) {
+  var root = getOrCreateFolder(rootName);
+  var monthName = Utilities.formatDate(date, TIMEZONE, "yyyy-MM");
+  var subs = root.getFoldersByName(monthName);
+  var month = subs.hasNext() ? subs.next() : root.createFolder(monthName);
+  return month.createFile(blob).getUrl();
+}
+
+function getOrCreateFolder(name) {
+  var folders = DriveApp.getFoldersByName(name);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(name);
+}
+
+/**
+ * Run this once (function dropdown next to Run) after adding the bank
+ * details as Script Properties. Checks they're all there and shows the
+ * agencies still missing a billing address. Prints to the execution log;
+ * the account number is masked so the log never holds it in full.
+ */
+function checkInvoiceSettings() {
+  var bank = getBankDetails();
+  Logger.log("Bank account name: " + (bank.accountName || "MISSING (" + BANK_PROPERTY_KEYS.accountName + ")"));
+  Logger.log("Sort code: " + (bank.sortCode || "MISSING (" + BANK_PROPERTY_KEYS.sortCode + ")"));
+  Logger.log("Account number: " + (bank.accountNumber ? "****" + bank.accountNumber.slice(-4) : "MISSING (" + BANK_PROPERTY_KEYS.accountNumber + ")"));
+  Logger.log(bank.complete ? "Bank details OK." : "Bank details incomplete: agent invoices will say to contact you for payment details.");
+  var sheetId = PropertiesService.getScriptProperties().getProperty(CUSTOMER_SHEET_PROPERTY_KEY);
+  var tab = sheetId ? SpreadsheetApp.openById(sheetId).getSheetByName(AGENCIES_SHEET_NAME) : null;
+  if (!tab) { Logger.log("No Agencies tab yet. It's created the first time an agent job is completed."); return; }
+  var data = tab.getDataRange().getValues();
+  var header = data[0];
+  var missing = data.slice(1).filter(function (r) { return !String(r[header.indexOf("Billing address")] || "").trim(); })
+    .map(function (r) { return r[header.indexOf("Business name")]; });
+  Logger.log(missing.length ? "Agencies missing a billing address: " + missing.join(", ") : "All agencies have a billing address.");
+}
+
+// Saves the signature (a base64 PNG data URL from the on-page canvas) into
+// a Drive folder in Niall's own account, named after the booking reference
+// so it's easy to find by hand later. Returns a shareable link, stored in
+// the sheet's "Signature link" column.
+function saveSignature(reference, dataUrl) {
+  var base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
+  var blob = Utilities.newBlob(Utilities.base64Decode(base64), "image/png", reference + "-signature.png");
+  var folder = getOrCreateSignatureFolder();
+  // Private to the business Google account (the signed completion PDF is
+  // what customers get). The sheet link opens for Niall when signed in.
+  return folder.createFile(blob).getUrl();
+}
+
+/**
+ * Run once (function dropdown -> Run) to make signature images saved before
+ * this version private too. Safe to run again.
+ */
+function makeSignaturesPrivate() {
+  var files = getOrCreateSignatureFolder().getFiles();
+  var changed = 0;
+  while (files.hasNext()) {
+    var f = files.next();
+    if (f.getSharingAccess() !== DriveApp.Access.PRIVATE) {
+      f.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
+      changed++;
+    }
+  }
+  Logger.log("Signature images made private: " + changed);
+}
+
+function getOrCreateSignatureFolder() {
+  var name = "EasyClean Somerset — Signatures";
+  var folders = DriveApp.getFoldersByName(name);
+  if (folders.hasNext()) return folders.next();
+  return DriveApp.createFolder(name);
+}
+
+// Invoice numbers count up from 1001 and never repeat or reuse a number,
+// even if a job is somehow completed twice or a run fails partway —
+// LockService keeps two near-simultaneous completions (unlikely for a
+// one-person operation, but cheap to guard against) from ever reading the
+// same "next" number before either has saved it back.
+var INVOICE_COUNTER_PROPERTY_KEY = "nextInvoiceNumber";
+
+function nextInvoiceNumber(alreadyLocked) {
+  var lock = alreadyLocked ? null : LockService.getScriptLock();
+  if (lock) lock.waitLock(10000);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var current = parseInt(props.getProperty(INVOICE_COUNTER_PROPERTY_KEY), 10);
+    if (!current) current = 1001;
+    props.setProperty(INVOICE_COUNTER_PROPERTY_KEY, String(current + 1));
+    return current;
+  } finally {
+    if (lock) lock.releaseLock();
+  }
+}
+
+// Splits the "2× Medium room: £90, 1× Car interior (all seats): £55" string
+// already built and stored at booking time back into invoice line items.
+// Each item's own price was already computed once, correctly, by the price
+// calculator at booking — this re-displays it, it never recalculates it.
+function parseItemLines(itemsString) {
+  return String(itemsString).split(", ").map(function (line) {
+    var parts = line.split(": ");
+    return { description: parts[0] || line, amount: parts[1] || "" };
+  });
+}
+
+// Sends the invoice (and the signed completion PDF, when there is one).
+// Consumers get the thank-you + review request. Agents get a plain invoice
+// email to whoever booked, copied to the agency's accounts email if one is
+// on the Agencies tab; no review request, since it's going to an office.
+function sendThankYouEmail(v, inv, attachments) {
+  var greetingName = inv.isAgent ? (v.Name || v["Business name"]) : v.Name;
+  var dueStr = inv.paymentDue ? Utilities.formatDate(inv.dueDate, TIMEZONE, "d MMMM yyyy") : "";
+  var subject, textBody;
+
+  if (inv.isAgent) {
+    subject = "Invoice " + inv.invoiceNo + " from EasyClean Somerset, " + v.Address;
+    textBody = "Hi " + greetingName + ",\n\n" +
+      "The clean at " + v.Address + " is done (our ref " + v.Reference + "). " +
+      (inv.paymentDue
+        ? "Invoice " + inv.invoiceNo + " for " + v.Total + " is attached, payment due by " + dueStr + ". Please use " + inv.invoiceNo + " as the payment reference."
+        : "Invoice " + inv.invoiceNo + " is attached, paid in cash on the day.") +
+      (attachments.length > 1 ? " The signed job completion confirmation is attached too." : "") +
+      "\n\nThanks,\nEasyClean Somerset";
+  } else {
+    subject = "Thanks for booking with EasyClean Somerset (Invoice " + inv.invoiceNo + ")";
+    textBody = "Hi " + greetingName + ",\n\n" +
+      "All done, thanks for booking with EasyClean Somerset. Your invoice/receipt is attached.\n\n" +
+      (inv.paymentDue ? "Payment of " + v.Total + " is due today by bank transfer. The bank details are on the invoice; please use " + inv.invoiceNo + " as the payment reference.\n\n" : "") +
+      (REVIEW_URL ? "If you've got a minute, a review really helps a small business like ours: " + REVIEW_URL + "\n\n" : "") +
+      "Thanks again,\nEasyClean Somerset";
+  }
+
+  var opts = {
+    htmlBody: buildThankYouEmailHtml({
+      name: greetingName, reference: v.Reference, invoiceNo: inv.invoiceNo,
+      isAgent: inv.isAgent, paymentDue: inv.paymentDue, dueStr: dueStr,
+      total: v.Total, address: v.Address, hasCompletion: attachments.length > 1
+    }),
+    attachments: attachments,
+    name: "EasyClean Somerset"
+  };
+  if (inv.accountsEmail && inv.accountsEmail.toLowerCase() !== String(v.Email).toLowerCase()) {
+    opts.cc = inv.accountsEmail;
+  }
+  GmailApp.sendEmail(v.Email, subject, textBody, opts);
+}
+
+// A standalone, emailed record of the sign-off itself — reference, what
+// was done, and the actual signature graphic — independent of the Drive
+// copy saveSignature() keeps, in case that one's ever moved, deleted, or
+// (as happened 21 Sept 2026, before a Drive authorisation gap was found
+// and fixed) silently never saved in the first place. Same rendering
+// approach as the invoice: HtmlService -> PDF, plain CSS, self-contained.
+function buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, signatureDataUrl) {
+  var esc = escHtml;
+  var lines = parseItemLines(v.Items);
+  var billToName = v.Channel === "Agent/Landlord" ? v["Business name"] : v.Name;
+  var dateStr = Utilities.formatDate(completedAt, TIMEZONE, "d MMMM yyyy");
+  var LOGO_URL = SITE_URL + "/apple-touch-icon.png";
+
+  var itemsList = lines.map(function (l) {
+    return '<li>' + esc(l.description) + '</li>';
+  }).join("");
+
+  var html =
+    '<html><head><style>' +
+    'body{font-family:Arial,Helvetica,sans-serif;color:#12232B;font-size:12px;margin:0;padding:32px;}' +
+    'h1{font-size:20px;margin:0 0 2px;}' +
+    '.muted{color:#5C6F73;}' +
+    '.brand{display:flex;align-items:center;gap:10px;margin-bottom:24px;}' +
+    '.brand img{display:block;width:32px;height:32px;}' +
+    '.statement{margin:20px 0;padding:14px 16px;background:#F5F7F6;border-left:3px solid #0E7C86;font-size:12.5px;line-height:1.6;}' +
+    'ul{margin:6px 0 0;padding-left:18px;}' +
+    'li{padding:2px 0;}' +
+    '.sig-block{margin-top:28px;}' +
+    '.sig-label{font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#5C6F73;margin-bottom:6px;}' +
+    '.sig-img{display:block;max-width:280px;max-height:110px;border-bottom:1px solid #12232B;padding-bottom:6px;}' +
+    '.foot{margin-top:32px;font-size:11px;color:#5C6F73;}' +
+    '</style></head><body>' +
+    '<div class="brand"><img src="' + LOGO_URL + '" width="32" height="32" alt="" /><h1>Job Completion Confirmation</h1></div>' +
+    '<div class="muted">Reference ' + esc(v.Reference) + '</div>' +
+    '<div class="muted">Completed ' + esc(dateStr) + '</div>' +
+    '<div class="muted" style="margin-top:14px;">' + esc(billToName) + '</div>' +
+    '<div class="muted">' + esc(v.Address) + '</div>' +
+    '<div class="muted" style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;margin-top:18px;">Work completed</div>' +
+    '<ul>' + itemsList + '</ul>' +
+    '<div class="statement">By signing below, the customer confirmed the work described above had been completed to their satisfaction.</div>' +
+    '<div class="sig-block">' +
+      '<div class="sig-label">' + (v.Channel === "Agent/Landlord" && v["Site contact name"]
+        ? 'Signed by ' + esc(v["Site contact name"]) + ' (site contact)'
+        : 'Customer signature') + '</div>' +
+      '<img class="sig-img" src="' + signatureDataUrl + '" />' +
+    '</div>' +
+    '<div class="foot">EasyClean Somerset &middot; Invoice ' + esc(formatInvoiceNo(invoiceNumber)) + '</div>' +
+    '</body></html>';
+
+  return HtmlService.createHtmlOutput(html).getAs("application/pdf").setName("Job-completion-" + v.Reference + ".pdf");
+}
+
+function buildThankYouEmailHtml(d) {
+  var esc = escHtml;
+  var INK = "#12232B", TEAL = "#0E7C86", PAPER = "#F5F7F6", SURFACE = "#FFFFFF";
+  var LINE = "#DCE3E2", SLATE = "#5C6F73", ON_INK = "#F5F7F6", STAMP = "#B5461E";
+  var SANS = "Arial,Helvetica,sans-serif";
+  var LOGO_URL = SITE_URL + "/apple-touch-icon.png";
+
+  return (
+    '<div style="background:' + PAPER + ';padding:40px 16px;">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">' +
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+        '<tr><td style="background:' + INK + ';padding:30px 28px 26px;text-align:center;">' +
+          '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">' +
+            '<tr>' +
+              '<td style="width:40px;height:40px;vertical-align:middle;">' +
+                '<img src="' + LOGO_URL + '" width="40" height="40" alt="EasyClean Somerset" style="display:block;width:40px;height:40px;" />' +
+              '</td>' +
+              '<td style="width:14px;font-size:14px;">&nbsp;</td>' +
+              '<td style="text-align:left;vertical-align:middle;">' +
+                '<span style="font-family:' + SANS + ';font-weight:800;font-size:19px;letter-spacing:0.01em;text-transform:uppercase;color:' + ON_INK + ';">Easy<span style="color:' + TEAL + ';">Clean</span> Somerset</span>' +
+              '</td>' +
+            '</tr>' +
+          '</table>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:32px 28px 30px;">' +
+          '<p style="margin:0 0 6px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Hi ' + esc(d.name) + ',</p>' +
+          '<h1 style="margin:0 0 6px;font-family:' + SANS + ';font-weight:800;font-size:26px;letter-spacing:-0.01em;color:' + INK + ';">' + (d.isAgent ? 'Job complete, invoice attached' : 'All done, thanks for booking') + '</h1>' +
+          '<div style="width:36px;height:3px;background:' + STAMP + ';margin:0 0 18px;font-size:3px;line-height:3px;">&nbsp;</div>' +
+          (d.isAgent
+            ? '<p style="margin:0 0 14px;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + SLATE + ';">The clean at ' + esc(d.address) + ' is done (our reference ' + esc(d.reference) + '). Invoice ' + esc(d.invoiceNo) + ' is attached' + (d.hasCompletion ? ', along with the signed job completion confirmation' : '') + '.</p>' +
+              (d.paymentDue
+                ? '<p style="margin:0 0 20px;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + INK + ';"><strong>' + esc(d.total) + ' due by ' + esc(d.dueStr) + '.</strong> Please use <strong>' + esc(d.invoiceNo) + '</strong> as the payment reference. Bank details are on the invoice.</p>'
+                : '<p style="margin:0 0 20px;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + SLATE + ';">Paid in cash on the day, nothing further to pay.</p>')
+            : '<p style="margin:0 0 ' + (d.paymentDue ? '14' : '20') + 'px;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + SLATE + ';">Your invoice (' + esc(d.invoiceNo) + ', reference ' + esc(d.reference) + ') is attached to this email.</p>' +
+              (d.paymentDue
+                ? '<p style="margin:0 0 20px;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + INK + ';"><strong>' + esc(d.total) + ' is due today by bank transfer.</strong> The bank details are on the invoice; please use <strong>' + esc(d.invoiceNo) + '</strong> as the payment reference.</p>'
+                : '')) +
+          (REVIEW_URL && !d.isAgent ?
+            '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 6px;"><tr><td style="background:' + TEAL + ';border-radius:3px;">' +
+              '<a href="' + REVIEW_URL + '" style="display:inline-block;padding:12px 24px;font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;color:' + ON_INK + ';text-decoration:none;">Leave us a review</a>' +
+            '</td></tr></table>' +
+            '<p style="margin:14px 0 0;font-family:' + SANS + ';font-size:13px;color:' + SLATE + ';">If you&#8217;ve got a minute, it really helps a small business like ours.</p>'
+            : '') +
+        '</td></tr>' +
+        '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:22px 28px;text-align:center;">' +
+          '<div style="font-family:' + SANS + ';font-weight:800;font-size:12.5px;letter-spacing:0.02em;text-transform:uppercase;color:' + SLATE + ';">EasyClean Somerset</div>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+      '</table>' +
+    '</div>'
+  );
+}
+
+// Rendered via HtmlService -> PDF rather than a Google Docs template, to
+// keep this whole system self-contained in one file with no extra Drive
+// document to lose track of. Plain CSS rather than the email builders'
+// table/inline-style approach, since this only ever goes through Apps
+// Script's own HTML-to-PDF conversion, not an email client.
+function buildInvoicePdfBlob(v, inv) {
+  var esc = escHtml;
+  var lines = parseItemLines(v.Items);
+  var dateStr = Utilities.formatDate(inv.completedAt, TIMEZONE, "d MMMM yyyy");
+  // Same brand-kit icon the site favicon and email headers use, so the
+  // invoice carries the current logo automatically whenever that file
+  // is updated — nothing here to touch when the mark changes again.
+  var LOGO_URL = SITE_URL + "/apple-touch-icon.png";
+  var CONTACT_EMAIL = "easycleansomerset@gmail.com";
+
+  var rows = lines.map(function (l) {
+    return '<tr><td class="desc">' + esc(l.description) + '</td><td class="amt">' + esc(l.amount) + '</td></tr>';
+  }).join("");
+
+  var label = function (t) { return '<div class="label">' + t + '</div>'; };
+  var statusPill = inv.paymentDue
+    ? '<span class="pill due">Payment due</span>'
+    : '<span class="pill paid">Paid</span>';
+
+  // Meta block under the invoice number: dates, and for agents their own
+  // reference so their accounts team can match it.
+  var meta = '<div class="muted">' + esc(inv.invoiceNo) + '</div>' +
+    '<div class="muted">Invoice date ' + esc(dateStr) + '</div>' +
+    (inv.paymentDue ? '<div class="muted">Due ' + esc(Utilities.formatDate(inv.dueDate, TIMEZONE, "d MMMM yyyy")) + '</div>' : '') +
+    '<div class="muted">Job ref ' + esc(v.Reference) + '</div>' +
+    (inv.isAgent && v["Agent/Agency ID"] ? '<div class="muted">Your ref ' + esc(v["Agent/Agency ID"]) + '</div>' : '');
+
+  var billTo = label("Billed to") +
+    '<div class="strong">' + esc(inv.billToName) + '</div>' +
+    (inv.billToAddress ? '<div class="muted pre">' + esc(inv.billToAddress) + '</div>' : '');
+
+  // Agents: the property is a separate line from who's paying.
+  var workAt = inv.isAgent
+    ? '<td class="half">' + label(inv.workAtLabel || "Work carried out at") +
+        '<div>' + esc(v.Address) + '</div>' +
+        (v["Site contact name"] ? '<div class="muted">Site contact: ' + esc(v["Site contact name"]) + '</div>' : '') +
+      '</td>'
+    : '<td class="half"></td>';
+
+  var payment;
+  if (inv.paymentDue) {
+    var b = inv.bank;
+    payment = '<div class="paybox">' + label("How to pay") +
+      (inv.dueOnCompletion
+        ? '<div class="strong">Please pay ' + esc(v.Total) + ' by bank transfer today.</div>'
+        : '<div class="strong">Please pay ' + esc(v.Total) + ' by bank transfer within ' + AGENT_PAYMENT_TERMS_DAYS + ' days, by ' +
+          esc(Utilities.formatDate(inv.dueDate, TIMEZONE, "d MMMM yyyy")) + '.</div>') +
+      (b.complete
+        ? '<table class="bank">' +
+            '<tr><td>Account name</td><td>' + esc(b.accountName) + '</td></tr>' +
+            '<tr><td>Sort code</td><td>' + esc(b.sortCode) + '</td></tr>' +
+            '<tr><td>Account number</td><td>' + esc(b.accountNumber) + '</td></tr>' +
+            '<tr><td>Payment reference</td><td><strong>' + esc(inv.invoiceNo) + '</strong></td></tr>' +
+          '</table>'
+        : '<div style="margin-top:6px;">Please email ' + CONTACT_EMAIL + ' for bank details, quoting ' + esc(inv.invoiceNo) + ' as the payment reference.</div>') +
+      '</div>';
+  } else {
+    payment = v["Payment method"] === "No charge"
+      ? '<div class="foot">No charge. Thanks for using EasyClean Somerset.</div>'
+      : '<div class="foot">Paid by ' + esc(v["Payment method"]) + ' on ' + esc(dateStr) + '. Thanks for booking with EasyClean Somerset.</div>';
+  }
+
+  var html =
+    '<html><head><style>' +
+    'body{font-family:Arial,Helvetica,sans-serif;color:#12232B;font-size:12px;margin:0;padding:32px;}' +
+    'h1{font-size:20px;margin:0 0 2px;}' +
+    '.muted{color:#5C6F73;}' +
+    '.strong{font-weight:bold;}' +
+    '.pre{white-space:pre-line;}' +
+    '.label{font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#5C6F73;margin-bottom:4px;}' +
+    '.layout{width:100%;border-collapse:collapse;margin:0 0 20px;}' +
+    '.layout td{border:none;padding:0;vertical-align:top;}' +
+    '.half{width:50%;}' +
+    '.brand img{width:32px;height:32px;vertical-align:middle;margin-right:8px;}' +
+    '.brand h1{display:inline;vertical-align:middle;}' +
+    '.pill{display:inline-block;margin-top:8px;padding:3px 10px;border-radius:10px;font-size:10px;font-weight:bold;letter-spacing:0.08em;text-transform:uppercase;}' +
+    '.pill.paid{background:#E3F2F1;color:#0E7C86;}' +
+    '.pill.due{background:#F9E6DF;color:#B5461E;}' +
+    'table.items{width:100%;border-collapse:collapse;margin-top:8px;}' +
+    'table.items th{text-align:left;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#5C6F73;border-bottom:1px solid #DCE3E2;padding:6px 0;}' +
+    'table.items td{padding:8px 0;border-bottom:1px solid #DCE3E2;}' +
+    'table.items .amt{text-align:right;}' +
+    '.total-row td{border-bottom:none !important;border-top:2px solid #12232B;font-weight:bold;padding-top:12px !important;}' +
+    '.paybox{margin-top:26px;padding:14px 16px;background:#F5F7F6;border-left:3px solid #B5461E;line-height:1.5;}' +
+    'table.bank{border-collapse:collapse;margin-top:8px;}' +
+    'table.bank td{padding:2px 18px 2px 0;border:none;}' +
+    'table.bank td:first-child{color:#5C6F73;}' +
+    '.foot{margin-top:32px;font-size:11px;color:#5C6F73;}' +
+    '</style></head><body>' +
+    '<table class="layout"><tr>' +
+      '<td class="half">' +
+        '<div class="brand"><img src="' + LOGO_URL + '" width="32" height="32" alt="" /><h1>Invoice</h1></div>' +
+        meta + statusPill +
+      '</td>' +
+      '<td class="half" style="text-align:right;">' +
+        '<div class="strong">' + esc(BUSINESS_NAME) + '</div>' +
+        '<div class="muted">trading as EasyClean Somerset</div>' +
+        '<div class="muted">' + esc(BUSINESS_ADDRESS) + '</div>' +
+        '<div class="muted">' + CONTACT_EMAIL + '</div>' +
+      '</td>' +
+    '</tr></table>' +
+    '<table class="layout"><tr><td class="half">' + billTo + '</td>' + workAt + '</tr></table>' +
+    '<table class="items"><tr><th>Description</th><th class="amt">Amount</th></tr>' +
+      rows +
+      '<tr class="total-row"><td>Total' + (inv.paymentDue ? ' due' : '') + '</td><td class="amt">' + esc(v.Total) + '</td></tr>' +
+    '</table>' +
+    payment +
+    (inv.paymentDue ? '<div class="foot">Thanks for using EasyClean Somerset.</div>' : '') +
+    '</body></html>';
+
+  return HtmlService.createHtmlOutput(html).getAs("application/pdf").setName(inv.invoiceNo + " " + v.Reference + ".pdf");
+}
+
+// ============================================================
+// Booking references, secret job tokens, and the private admin app
+// ============================================================
+//
+// Why this exists: the short "EC-12345" reference is fine for people to
+// read and quote, but it's short enough to guess. So nothing public ever
+// accepts it. Every booking also gets a long random "Job token" (stored in
+// the sheet), which is what the customer signing link carries. Everything
+// Niall does himself (on-site sign-off, sending signing links, marking
+// invoices paid) lives in the private admin app below, which only opens for
+// the Google account that owns this script.
+//
+// ADMIN APP SETUP (one-time):
+//   1. In the Apps Script editor: + (Add a file) -> HTML -> name it
+//      "Dashboard" and paste in Dashboard.html. (Deliberately a different
+//      word from the website's admin.html launcher page, so the two can't be
+//      mixed up.)
+//   2. Deploy -> New deployment -> Web app -> Execute as: Me ->
+//      Who has access: Only myself -> Deploy. Copy that /exec URL.
+//      (This is a SECOND deployment. Leave the existing public one alone.)
+//   3. Project Settings -> Script Properties -> add ADMIN_URL = that URL.
+//   4. Run setUpAdmin once (function dropdown -> Run). It gives every
+//      existing booking a job token and points upcoming calendar events'
+//      job links at the admin app.
+//   5. Open ADMIN_URL on your phone (in a browser where the business Google
+//      account is the default, i.e. signed into first) and "Add to Home
+//      Screen".
+// After any later Code.gs or Dashboard.html change, redeploy BOTH deployments
+// as a new version (Manage deployments -> edit each -> New version).
+
+var ADMIN_URL_PROPERTY_KEY = "ADMIN_URL";
+var JOB_LINK_LABEL = "Job link (tap on the day to sign it off): ";
+
+// "EC-" + 5 digits, checked against every reference already in the sheet.
+// (Older bookings have 4 digits; both formats keep working.)
+function newBookingReference() {
+  var existing = {};
+  try {
+    var sheet = getCustomerSheet();
+    if (sheet) {
+      var data = sheet.getDataRange().getValues();
+      var col = data[0].indexOf("Reference");
+      for (var i = 1; i < data.length; i++) existing[data[i][col]] = true;
+    }
+  } catch (err) {
+    console.error("Couldn't read existing references: " + err);
+  }
+  for (var attempt = 0; attempt < 50; attempt++) {
+    var ref = "EC-" + Math.floor(10000 + Math.random() * 90000);
+    if (!existing[ref]) return ref;
+  }
+  return "EC-" + Math.floor(10000 + Math.random() * 90000) + Math.floor(Math.random() * 10);
+}
+
+// 32 hex characters from a random UUID: not guessable.
+function newJobToken() {
+  return Utilities.getUuid().replace(/-/g, "");
+}
+
+function isPlausibleToken(token) {
+  return typeof token === "string" && /^[0-9a-f]{32}$/i.test(token);
+}
+
+function findBookingByToken(token) {
+  if (!isPlausibleToken(token)) return null;
+  var sheet = getCustomerSheet();
+  if (!sheet) return null;
+  var data = sheet.getDataRange().getValues();
+  var col = data[0].indexOf("Job token");
+  if (col === -1) return null;
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][col] === token) return { rowIndex: i + 1, values: rowToObject(data[0], data[i]) };
+  }
+  return null;
+}
+
+function publicSigningLink(token) {
+  return SITE_URL + "/job-complete.html?t=" + encodeURIComponent(token);
+}
+
+function getAdminUrl() {
+  return PropertiesService.getScriptProperties().getProperty(ADMIN_URL_PROPERTY_KEY) || "";
+}
+
+// Link written into each calendar event. Opens the job in the admin app
+// (Google sign-in required), or says where to find it if the admin app
+// isn't set up yet.
+function adminJobLink(token, reference) {
+  var url = getAdminUrl();
+  return url ? url + "?page=job&t=" + encodeURIComponent(token)
+             : "open the EasyClean admin app and search " + reference;
+}
+
+// True only when the person viewing is the Google account that owns this
+// script. On the public deployment visitors are anonymous, so their email
+// comes back blank and this is false. The "Only myself" deployment setting
+// is the main wall; this is the second one.
+function isOwner() {
+  try {
+    var active = Session.getActiveUser().getEmail();
+    var owner = Session.getEffectiveUser().getEmail();
+    return !!active && !!owner && active.toLowerCase() === owner.toLowerCase();
+  } catch (err) {
+    return false;
+  }
+}
+
+function requireOwner() {
+  if (!isOwner()) throw new Error("not_authorised");
+}
+
+function serveAdminPage(p) {
+  if (!isOwner()) return notAvailable(); // plain text, never HTML (see doGet)
+  // If the Admin HTML file is missing, empty or only half-pasted, say so
+  // instead of showing a blank page.
+  var problem = function (msg) {
+    return HtmlService.createHtmlOutput("<p style=\"font-family:Arial,sans-serif;padding:24px;line-height:1.5;\">" + msg + "</p>")
+      .setTitle("EasyClean admin");
+  };
+  var template;
+  try {
+    template = HtmlService.createTemplateFromFile("Dashboard");
+  } catch (err) {
+    return problem("Couldn't find the Dashboard file. In the Apps Script editor, add an HTML file named exactly <b>Dashboard</b>, paste in Dashboard.html, save, and redeploy as a new version.");
+  }
+  template.initJson = JSON.stringify({
+    view: p.page === "job" ? "job" : "home",
+    token: isPlausibleToken(p.t) ? p.t : ""
+  }).replace(/</g, "\\u003c");
+  var out = template.evaluate();
+  if (out.getContent().indexOf('id="app"') === -1) {
+    return problem("The Dashboard file in Apps Script looks empty or isn't the right file. Open it, select all, paste in the whole of Dashboard.html again, save, and redeploy as a new version.");
+  }
+  return out
+    .setTitle("EasyClean admin")
+    .setFaviconUrl(SITE_URL + "/favicon-32.png")
+    .addMetaTag("viewport", "width=device-width, initial-scale=1");
+}
+
+// Gives every booking row without a job token one. Safe to run repeatedly.
+function ensureJobTokens(sheet) {
+  var header = ensureColumns(sheet, ["Job token"]);
+  var col = header.indexOf("Job token");
+  var data = sheet.getDataRange().getValues();
+  var added = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (!data[i][header.indexOf("Reference")]) continue; // blank row
+    if (!data[i][col]) {
+      var cell = sheet.getRange(i + 1, col + 1);
+      cell.setNumberFormat("@"); // plain text, so Sheets never turns it into a number
+      cell.setValue(newJobToken());
+      added++;
+    }
+  }
+  return added;
+}
+
+/**
+ * Run once after setting ADMIN_URL (see ADMIN APP SETUP above). Backfills
+ * job tokens for existing bookings and rewrites the job link on calendar
+ * events from 30 days ago to 60 days ahead so they open the admin app
+ * instead of the old public page. Safe to run again.
+ */
+function setUpAdmin() {
+  var url = getAdminUrl();
+  Logger.log(url ? "ADMIN_URL: " + url : "ADMIN_URL not set yet. Add it under Project Settings -> Script Properties, then run this again.");
+  var sheet = getCustomerSheet();
+  if (!sheet) { Logger.log("Customer sheet not set up."); return; }
+  Logger.log("Job tokens added to " + ensureJobTokens(sheet) + " existing booking(s).");
+  if (!url) return;
+  var now = new Date();
+  var from = new Date(now.getTime() - 30 * 86400000);
+  var to = new Date(now.getTime() + 60 * 86400000);
+  var updated = 0;
+  CalendarApp.getDefaultCalendar().getEvents(from, to).forEach(function (ev) {
+    var ref = referenceFromEvent(ev);
+    if (!ref) return;
+    var row = findBookingRow(ref);
+    if (!row || !row.values["Job token"]) return;
+    var desc = ev.getDescription() || "";
+    var line = JOB_LINK_LABEL + adminJobLink(row.values["Job token"], ref);
+    var next = /^Job link.*$/m.test(desc) ? desc.replace(/^Job link.*$/m, line) : desc + "\n" + line;
+    if (next !== desc) { ev.setDescription(next); updated++; }
+  });
+  Logger.log("Calendar job links updated on " + updated + " event(s).");
+}
+
+// ---- Admin app API (called from Dashboard.html via google.script.run) ----
+// Every function checks the owner first. Dates go back as strings, since
+// google.script.run can't return Date objects.
+
+function fmtDay(d) {
+  return d instanceof Date ? Utilities.formatDate(d, TIMEZONE, "EEE d MMM yyyy") : String(d || "");
+}
+
+function dayKey(d) {
+  return Utilities.formatDate(d, TIMEZONE, "yyyy-MM-dd");
+}
+
+function adminJobSummary(v, start) {
+  var isAgent = v.Channel === "Agent/Landlord";
+  var signerPhone = phoneText(isAgent ? (v["Site contact phone"] || v.Phone) : v.Phone);
+  var due = v["Payment due"] instanceof Date ? v["Payment due"] : null;
+  var today = new Date();
+  var summary = {
+    token: v["Job token"],
+    reference: v.Reference,
+    channel: v.Channel || "Consumer",
+    name: isAgent ? v["Business name"] : v.Name,
+    contact: isAgent ? (v["Site contact name"] || "") : "",
+    access: isAgent ? (v.Access || (v["Site contact name"] ? "Someone on site" : "")) : "",
+    address: v.Address,
+    items: v.Items,
+    total: v["Cancellation fee"] || v.Total,
+    bookingTotal: v.Total,
+    payment: v["Payment method"],
+    when: start ? fmtWhen(start) : bookingTimeText(v),
+    cancelled: !!v["Cancelled at"],
+    cancelledAt: fmtDay(v["Cancelled at"]),
+    cancelledBy: v["Cancelled by"] || "",
+    cancelNote: v["Cancellation note"] || "",
+    cancelFee: v["Cancellation fee"] || "",
+    remindedOn: fmtDay(v["Payment reminder sent"]),
+    completed: !!v["Completed at"],
+    completedAt: fmtDay(v["Completed at"]),
+    invoiceNo: v["Invoice number"] ? formatInvoiceNo(v["Invoice number"]) : "",
+    invoiceUrl: /^https?:/.test(String(v["Invoice PDF"] || "")) ? v["Invoice PDF"] : "",
+    paymentDue: due ? fmtDay(due) : "",
+    daysOverdue: due ? Math.floor((today - due) / 86400000) : 0,
+    paidOn: fmtDay(v["Paid on"]),
+    hasEmail: !!v.Email,
+    whatsappNumber: toWhatsAppNumber(signerPhone),
+    signingLink: v["Job token"] ? publicSigningLink(v["Job token"]) : ""
+  };
+  return plainForPage(summary);
+}
+
+function fmtWhen(d) {
+  return Utilities.formatDate(d, TIMEZONE, "EEE d MMM, h:mma").replace("AM", "am").replace("PM", "pm");
+}
+
+// google.script.run silently turns the WHOLE response into null if any value
+// in it is a Date (the page then fails with "null is not an object"). Google
+// Sheets often stores things like the "Booking time" label as a real date,
+// so every value going back to the admin page is converted here: dates to
+// readable text, anything else non-basic to a string.
+function plainForPage(obj) {
+  var out = {};
+  Object.keys(obj).forEach(function (k) {
+    var val = obj[k];
+    if (val instanceof Date) out[k] = isNaN(val.getTime()) ? "" : fmtWhen(val);
+    else if (val === null || val === undefined) out[k] = "";
+    else if (typeof val === "object") out[k] = String(val);
+    else out[k] = val;
+  });
+  return out;
+}
+
+// Calendar start time for one booking, so a single job (opened from a
+// calendar link or a search) shows a proper date and time too.
+function calendarStartFor(reference) {
+  try {
+    var now = new Date();
+    var events = CalendarApp.getDefaultCalendar()
+      .getEvents(new Date(now.getTime() - 60 * 86400000), new Date(now.getTime() + 60 * 86400000));
+    for (var i = 0; i < events.length; i++) {
+      if (referenceFromEvent(events[i]) === reference) return events[i].getStartTime();
+    }
+  } catch (err) {
+    console.error("Calendar lookup failed for " + reference + ": " + err);
+  }
+  return null;
+}
+
+function adminGetOverview() {
+  requireOwner();
+  var sheet = getCustomerSheet();
+  if (!sheet) return { ok: false, error: "no_sheet" };
+  ensureJobTokens(sheet);
+  ensureColumns(sheet, COMPLETION_COLUMNS);
+  var data = sheet.getDataRange().getValues();
+  var header = data[0];
+
+  // Booking start times come from the calendar (the sheet only has a label).
+  // A booking whose event has been deleted (cancelled) won't appear in the
+  // job lists, but can still be found by reference search.
+  var now = new Date();
+  var starts = {};
+  CalendarApp.getDefaultCalendar()
+    .getEvents(new Date(now.getTime() - 30 * 86400000), new Date(now.getTime() + 30 * 86400000))
+    .forEach(function (ev) {
+      var ref = referenceFromEvent(ev);
+      if (ref) starts[ref] = ev.getStartTime();
+    });
+
+  var todayKey = dayKey(now);
+  var today = [], waiting = [], upcoming = [], unpaid = [], recentlyPaid = [];
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (!v.Reference) continue;
+    var start = starts[v.Reference] || null;
+    var job = adminJobSummary(v, start);
+    if (!v["Completed at"] && start) {
+      var k = dayKey(start);
+      job._sort = start.getTime();
+      if (k === todayKey) today.push(job);
+      else if (k < todayKey) waiting.push(job);
+      else upcoming.push(job);
+    }
+    if (v["Payment due"] && !v["Paid on"]) {
+      job._sort = v["Payment due"] instanceof Date ? v["Payment due"].getTime() : 0;
+      unpaid.push(job);
+    } else if (v["Payment due"] && v["Paid on"] instanceof Date && (now - v["Paid on"]) < 30 * 86400000) {
+      job._paidSort = v["Paid on"].getTime();
+      recentlyPaid.push(job);
+    }
+  }
+  var bySort = function (a, b) { return a._sort - b._sort; };
+  today.sort(bySort); waiting.sort(bySort); upcoming.sort(bySort); unpaid.sort(bySort);
+  recentlyPaid.sort(function (a, b) { return b._paidSort - a._paidSort; });
+  var strip = function (list) { return list.map(function (j) { delete j._sort; delete j._paidSort; return j; }); };
+  return {
+    ok: true,
+    today: strip(today), waiting: strip(waiting), upcoming: strip(upcoming),
+    unpaid: strip(unpaid), recentlyPaid: strip(recentlyPaid.slice(0, 10))
+  };
+}
+
+function adminGetJob(token) {
+  requireOwner();
+  var row = findBookingByToken(token);
+  if (!row) return { ok: false, error: "not_found" };
+  var start = calendarStartFor(row.values.Reference);
+  var job = adminJobSummary(row.values, start);
+  job.ok = true;
+  job.hasCalendarEvent = !!start;
+  job.lateNotice = !!start && isLateCancellation(start, new Date());
+  job.feeAmount = "£" + LATE_CANCELLATION_FEE;
+  return job;
+}
+
+// Search by EC- reference (or part of a name/business), for jobs that
+// aren't in the lists above. Returns every match, so a duplicated old
+// 4-digit reference shows both bookings rather than silently picking one.
+function adminSearch(query) {
+  requireOwner();
+  var q = String(query || "").trim().toLowerCase();
+  if (q.length < 3) return { ok: true, results: [] };
+  var sheet = getCustomerSheet();
+  ensureJobTokens(sheet);
+  var data = sheet.getDataRange().getValues();
+  var results = [];
+  for (var i = data.length - 1; i >= 1 && results.length < 20; i--) {
+    var v = rowToObject(data[0], data[i]);
+    var hay = [v.Reference, v.Name, v["Business name"], v.Address].join(" ").toLowerCase();
+    if (hay.indexOf(q) !== -1) results.push(adminJobSummary(v, null));
+  }
+  return { ok: true, results: results };
+}
+
+function adminCompleteJob(token, signatureDataUrl, reason) {
+  requireOwner();
+  if (signatureDataUrl) return completeJob({ token: token, signature: signatureDataUrl });
+  return completeJob({ token: token, noSignature: true, reason: reason || "" });
+}
+
+function adminSendSigningLink(token) {
+  requireOwner();
+  var row = findBookingByToken(token);
+  if (!row) return { ok: false, error: "not_found" };
+  return sendSigningLinkForRow(row);
+}
+
+// isoDate is "yyyy-mm-dd" from the page's date picker. Stored at midday so
+// a timezone shift can never move it to the day before.
+function adminMarkPaid(token, isoDate, sendReceipt) {
+  requireOwner();
+  var row = findBookingByToken(token);
+  if (!row) return { ok: false, error: "not_found" };
+  var v = row.values;
+  if (!v["Invoice number"]) return { ok: false, error: "not_invoiced" };
+  if (v["Paid on"]) return { ok: true, alreadyPaid: true };
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(isoDate || ""));
+  var paidOn = m ? new Date(+m[1], +m[2] - 1, +m[3], 12) : new Date();
+  var sheet = getCustomerSheet();
+  var header = ensureColumns(sheet, ["Paid on"]);
+  sheet.getRange(row.rowIndex, header.indexOf("Paid on") + 1).setValue(paidOn);
+  var receiptSent = false;
+  if (sendReceipt && v.Email) {
+    try {
+      sendPaymentReceipt(v, paidOn);
+      receiptSent = true;
+    } catch (err) {
+      console.error("Receipt email failed for " + v.Reference + ": " + err);
+    }
+  }
+  return { ok: true, paidOn: fmtDay(paidOn), receiptSent: receiptSent };
+}
+
+// Undo for a mis-tap. Only for invoices that had a payment due (agent
+// invoices); consumer/cash jobs are paid at completion by definition.
+function adminMarkUnpaid(token) {
+  requireOwner();
+  var row = findBookingByToken(token);
+  if (!row) return { ok: false, error: "not_found" };
+  if (!row.values["Payment due"]) return { ok: false, error: "not_payment_due" };
+  var sheet = getCustomerSheet();
+  var header = ensureColumns(sheet, ["Paid on"]);
+  sheet.getRange(row.rowIndex, header.indexOf("Paid on") + 1).setValue("");
+  return { ok: true };
+}
+
+
+// ---- Admin app: add a booking yourself, and edit a job (FRE-183) ----
+// For phone, WhatsApp and Quick Quote jobs, price matches, extra items
+// agreed on the day, moving a job, and £0 guarantee re-cleans. Bookings
+// made here are the same as website bookings (reference, calendar event,
+// reminders, invoice on sign-off), but with no 24-hour, price-list or
+// postcode rules: you're in charge.
+
+var ADMIN_PAYMENT_OPTIONS = ["Cash", "Bank transfer", "Invoice, 14 days", "No charge"];
+
+function money_(n) {
+  var neg = n < 0, a = Math.abs(Math.round(n * 100) / 100);
+  return (neg ? "-£" : "£") + (a % 1 ? a.toFixed(2) : String(a));
+}
+
+function parseMoney_(s) {
+  var m = /^(-?)£?(\d+(?:\.\d{1,2})?)$/.exec(String(s || "").replace(/[\s,]/g, ""));
+  return m ? (m[1] ? -1 : 1) * parseFloat(m[2]) : null;
+}
+
+// An item line's wording can't contain ", " or ": " (the items text is
+// split on those) or "×".
+function cleanItemText_(s) {
+  return String(s || "").replace(/[\r\n\t]+/g, " ").replace(/×/g, "x").replace(/,\s*/g, " ").replace(/:\s*/g, " - ").replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+// Turns the admin form into booking data, checking everything.
+// Returns { error } or { data, start, end }.
+function buildAdminBooking_(f) {
+  f = f || {};
+  var str = function (v, max) { return String(v === undefined || v === null ? "" : v).trim().slice(0, max); };
+  var channel = f.channel === "Agent/Landlord" ? "Agent/Landlord" : "Consumer";
+  var d = {
+    channel: channel,
+    name: str(f.name, 100),
+    phone: str(f.phone, 40),
+    email: str(f.email, 254),
+    address: str(f.address, 300),
+    businessName: str(f.businessName, 120),
+    agencyId: str(f.agencyId, 60),
+    siteContactName: str(f.siteContactName, 100),
+    siteContactPhone: str(f.siteContactPhone, 40),
+    accessArrange: channel === "Agent/Landlord" && !!f.accessArrange,
+    referralCode: str(f.referralCode, 40),
+    notes: str(f.notes, 500).replace(/[\r\n]+/g, " "),
+    payment: ADMIN_PAYMENT_OPTIONS.indexOf(f.payment) !== -1 ? f.payment : "",
+    bookedVia: "Admin app",
+    marketingOptIn: false
+  };
+  var postcode = str(f.postcode, 12).toUpperCase();
+  if (postcode && d.address.toUpperCase().replace(/\s/g, "").indexOf(postcode.replace(/\s/g, "")) === -1) d.address += ", " + postcode;
+  if (!d.name) return { error: "Add a name." };
+  if (!d.address) return { error: "Add an address." };
+  if (!d.phone && !d.email) return { error: "Add a phone number or an email address." };
+  if (d.email && !EMAIL_PATTERN.test(d.email)) return { error: "That email address doesn't look right." };
+  if (d.phone && d.phone.replace(/\D/g, "").length < 7) return { error: "That phone number doesn't look right." };
+  if (!d.payment) return { error: "Choose how they'll pay." };
+  if (channel === "Agent/Landlord") {
+    if (!d.businessName) d.businessName = d.name; // private landlord
+    if (!d.accessArrange && !d.siteContactName) { d.siteContactName = d.name; d.siteContactPhone = d.siteContactPhone || d.phone; }
+  }
+  var lines = Array.isArray(f.lines) ? f.lines : [];
+  if (!lines.length) return { error: "Add at least one item." };
+  if (lines.length > 40) return { error: "That's too many lines." };
+  var total = 0, mins = 0, parts = [];
+  for (var i = 0; i < lines.length; i++) {
+    var l = lines[i] || {};
+    var desc = cleanItemText_(l.desc);
+    var qty = parseInt(l.qty, 10);
+    var unit = Number(l.unit);
+    var lm = parseInt(l.mins, 10) || 0;
+    if (!desc) return { error: "Every line needs a description." };
+    if (!(qty >= 1 && qty <= 50)) return { error: "Check the quantity on \"" + desc + "\"." };
+    if (!isFinite(unit) || Math.abs(unit) > 10000) return { error: "Check the price on \"" + desc + "\"." };
+    unit = Math.round(unit * 100) / 100;
+    lm = Math.max(0, Math.min(lm, 600));
+    total += qty * unit;
+    mins += qty * lm;
+    parts.push(qty + "× " + desc + ": " + money_(qty * unit));
+  }
+  total = Math.round(total * 100) / 100;
+  if (total < 0) return { error: "The total can't be below £0." };
+  d.items = parts.join(", ");
+  d.total = money_(total);
+  d.estTime = "~" + formatMinsServer(FIXED_OVERHEAD_MINS + mins);
+
+  var day = parseIsoDate_(f.date), t = parseHhmm_(f.time);
+  if (!day || !t) return { error: "Pick a date and start time." };
+  var start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), t.h, t.m);
+  var length = parseInt(f.lengthMins, 10);
+  if (!(length >= 30 && length <= 720)) return { error: "Pick how long the job takes." };
+  var end = new Date(start.getTime() + length * 60000);
+  return { data: d, start: start, end: end };
+}
+
+// The calendar event for a booking, or null if it's been deleted.
+function findBookingEvent_(reference) {
+  var now = new Date();
+  var events = CalendarApp.getDefaultCalendar()
+    .getEvents(new Date(now.getTime() - 120 * 86400000), new Date(now.getTime() + 365 * 86400000));
+  for (var i = 0; i < events.length; i++) {
+    if (referenceFromEvent(events[i]) === reference) return events[i];
+  }
+  return null;
+}
+
+// Other things already in the calendar at that time (bookings, blocks,
+// personal events), described for a "book it anyway?" check.
+function clashesFor_(start, end, ignoreEvent) {
+  var ignoreId = ignoreEvent ? ignoreEvent.getId() : null;
+  return CalendarApp.getDefaultCalendar().getEvents(start, end)
+    .filter(function (ev) { return !ignoreId || ev.getId() !== ignoreId; })
+    .map(function (ev) { return referenceFromEvent(ev) || String(ev.getTitle() || "Something in your calendar"); });
+}
+
+// Writes named columns on one row, keeping text columns as plain text.
+function setRowValues_(sheet, rowIndex, header, obj) {
+  Object.keys(obj).forEach(function (h) {
+    var col = header.indexOf(h) + 1;
+    if (!col) return;
+    var cell = sheet.getRange(rowIndex, col);
+    var val = obj[h];
+    if (TEXT_COLUMNS.indexOf(h) !== -1) {
+      cell.setNumberFormat("@");
+      if (typeof val === "string" && val.charAt(0) === "=") val = " " + val;
+    }
+    cell.setValue(val);
+  });
+}
+
+// The admin item list for one channel, in price-list order.
+function adminGetPriceList(channel) {
+  requireOwner();
+  try {
+    var list = getPriceList(channel === "Agent/Landlord" ? "Agent/Landlord" : "Consumer");
+    return {
+      ok: true,
+      items: Object.keys(list).map(function (k) { return { item: k, price: list[k].price, mins: list[k].mins }; }),
+      overheadMins: FIXED_OVERHEAD_MINS, slotMins: SLOT_MINS
+    };
+  } catch (err) {
+    return { ok: true, items: [], overheadMins: FIXED_OVERHEAD_MINS, slotMins: SLOT_MINS, warning: "Couldn't read the price list from the website, so add items as custom lines." };
+  }
+}
+
+function adminCreateBooking(form) {
+  requireOwner();
+  var built = buildAdminBooking_(form);
+  if (built.error) return { ok: false, error: built.error };
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { return { ok: false, error: "Busy, try again in a moment." }; }
+  try {
+    var clashes = clashesFor_(built.start, built.end, null);
+    if (clashes.length && !form.force) return { ok: false, needsConfirm: true, clashes: clashes };
+    var d = built.data;
+    var reference = newBookingReference();
+    var jobToken = newJobToken();
+    var cal = CalendarApp.getDefaultCalendar();
+    cal.createEvent(bookingEventTitle_(d), built.start, built.end, {
+      description: bookingEventDescription_(d, reference, adminJobLink(jobToken, reference)),
+      location: d.address
+    });
+    appendCustomerRow(d, reference, fmtWhen(built.start), jobToken);
+    try { refreshSlotsCache(); } catch (err) { console.error("Cache refresh after admin booking failed: " + err); }
+    var emailed = false, emailError = "";
+    if (form.emailCustomer && d.email) {
+      try { sendBookingConfirmation_(d, reference, fmtWhen(built.start)); emailed = true; }
+      catch (err) { emailError = String(err); console.error("Admin booking confirmation failed: " + err); }
+    }
+    return { ok: true, reference: reference, token: jobToken, emailed: emailed, emailError: emailError };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Everything the edit form needs, including the items split back into lines.
+function adminGetJobForEdit(token) {
+  requireOwner();
+  var row = findBookingByToken(token);
+  if (!row) return { ok: false, error: "not_found" };
+  var v = row.values;
+  var ev = findBookingEvent_(v.Reference);
+  var start = ev ? ev.getStartTime() : null, end = ev ? ev.getEndTime() : null;
+  var list = {};
+  try { list = getPriceList(v.Channel === "Agent/Landlord" ? "Agent/Landlord" : "Consumer"); } catch (err) { list = {}; }
+  var lines = String(v.Items || "").split(", ").filter(function (x) { return x; }).map(function (part) {
+    var cut = part.lastIndexOf(": ");
+    var left = cut === -1 ? part : part.slice(0, cut);
+    var amount = cut === -1 ? null : parseMoney_(part.slice(cut + 2));
+    var m = /^(\d+)×\s*(.*)$/.exec(left);
+    var qty = m ? parseInt(m[1], 10) : 1;
+    var desc = m ? m[2] : left;
+    var unit = amount === null ? 0 : Math.round(amount / qty * 100) / 100;
+    if (amount !== null && Math.round(unit * qty * 100) !== Math.round(amount * 100)) {
+      // Doesn't split evenly into a unit price, so keep it as one line with the exact amount.
+      desc = qty + "x " + desc; qty = 1; unit = amount;
+    }
+    return { desc: desc, qty: qty, unit: unit, mins: list[desc] ? list[desc].mins : 0, fromList: !!list[desc] };
+  });
+  var plain = function (x) { return x instanceof Date ? fmtWhen(x) : String(x === undefined || x === null ? "" : x); };
+  return {
+    ok: true,
+    token: token, reference: v.Reference,
+    cancelled: !!v["Cancelled at"], completed: !!v["Completed at"],
+    channel: v.Channel === "Agent/Landlord" ? "Agent/Landlord" : "Consumer",
+    name: plain(v.Name), phone: phoneText(v.Phone), email: plain(v.Email), address: plain(v.Address),
+    businessName: plain(v["Business name"]), agencyId: plain(v["Agent/Agency ID"]),
+    siteContactName: plain(v["Site contact name"]), siteContactPhone: phoneText(v["Site contact phone"]),
+    accessArrange: /^Agent arranging/.test(String(v.Access || "")),
+    referralCode: plain(v["Referral / offer code"]), notes: plain(v.Notes),
+    payment: plain(v["Payment method"]),
+    lines: lines,
+    date: start ? Utilities.formatDate(start, TIMEZONE, "yyyy-MM-dd") : "",
+    time: start ? Utilities.formatDate(start, TIMEZONE, "HH:mm") : "",
+    lengthMins: start && end ? Math.round((end - start) / 60000) : SLOT_MINS,
+    hasCalendarEvent: !!ev
+  };
+}
+
+function adminUpdateJob(token, form) {
+  requireOwner();
+  form = form || {};
+  var built = buildAdminBooking_(form);
+  if (built.error) return { ok: false, error: built.error };
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { return { ok: false, error: "Busy, try again in a moment." }; }
+  try {
+    var row = findBookingByToken(token);
+    if (!row) return { ok: false, error: "Couldn't find that job." };
+    var v = row.values;
+    if (v["Cancelled at"]) return { ok: false, error: "This booking is cancelled." };
+    if (v["Completed at"]) return { ok: false, error: "This job is already signed off, so it can't be changed." };
+    var d = built.data;
+    var ref = v.Reference;
+    var ev = findBookingEvent_(ref);
+    var clashes = clashesFor_(built.start, built.end, ev);
+    if (clashes.length && !form.force) return { ok: false, needsConfirm: true, clashes: clashes };
+
+    var oldStart = ev ? ev.getStartTime() : null;
+    var timeChanged = !oldStart || oldStart.getTime() !== built.start.getTime() || (ev && ev.getEndTime().getTime() !== built.end.getTime());
+    var dayChanged = !oldStart || Utilities.formatDate(oldStart, TIMEZONE, "yyyy-MM-dd") !== Utilities.formatDate(built.start, TIMEZONE, "yyyy-MM-dd");
+    var oldTotal = String(v.Total || ""), oldItems = String(v.Items || "");
+    // Keep "Booked via" as it was (a website booking stays a website booking).
+    d.bookedVia = v["Booked via"] || "Website";
+
+    var changes = [];
+    if (oldStart && timeChanged) changes.push("time " + fmtWhen(oldStart) + " to " + fmtWhen(built.start));
+    if (oldTotal !== d.total) changes.push("total " + oldTotal + " to " + d.total);
+    else if (oldItems !== d.items) changes.push("items");
+    ["Name", "Phone", "Email", "Address", "Payment method"].forEach(function (h) {
+      var key = { "Name": "name", "Phone": "phone", "Email": "email", "Address": "address", "Payment method": "payment" }[h];
+      var before = h === "Phone" ? phoneText(v[h]) : String(v[h] || "");
+      if (before !== d[key]) changes.push(h.toLowerCase());
+    });
+    var reason = String(form.changeReason || "").trim().slice(0, 120);
+
+    var jobLink = adminJobLink(v["Job token"], ref);
+    if (ev) {
+      ev.setTitle(bookingEventTitle_(d));
+      ev.setDescription(bookingEventDescription_(d, ref, jobLink));
+      ev.setLocation(d.address);
+      if (timeChanged) ev.setTime(built.start, built.end);
+    } else {
+      CalendarApp.getDefaultCalendar().createEvent(bookingEventTitle_(d), built.start, built.end, {
+        description: bookingEventDescription_(d, ref, jobLink), location: d.address
+      });
+    }
+
+    var sheet = getCustomerSheet();
+    var header = ensureColumns(sheet, ["Notes", "Changes", "Booked via", "Access"]);
+    var log = String(v.Changes || "");
+    var entry = Utilities.formatDate(new Date(), TIMEZONE, "d MMM") + ": " + (changes.length ? changes.join(", ") : "details") + (reason ? " (" + reason + ")" : "");
+    var writes = {
+      "Name": d.name, "Phone": d.phone, "Email": d.email, "Address": d.address,
+      "Items": d.items, "Total": d.total, "Payment method": d.payment,
+      "Booking time": fmtWhen(built.start),
+      "Business name": d.channel === "Agent/Landlord" ? d.businessName : "",
+      "Site contact name": d.channel === "Agent/Landlord" && !d.accessArrange ? d.siteContactName : "",
+      "Site contact phone": d.channel === "Agent/Landlord" && !d.accessArrange ? d.siteContactPhone : "",
+      "Agent/Agency ID": d.agencyId, "Access": d.channel === "Agent/Landlord" ? accessLabel(d) : "",
+      "Referral / offer code": d.referralCode, "Notes": d.notes, "Channel": d.channel,
+      "Changes": (log ? log + "; " : "") + entry
+    };
+    // A job moved to another day gets its reminders again on the new dates.
+    if (dayChanged) { writes["Day-before reminder sent"] = ""; writes["Day-of reminder sent"] = ""; }
+    setRowValues_(sheet, row.rowIndex, header, writes);
+    try { refreshSlotsCache(); } catch (err) { console.error("Cache refresh after editing a job failed: " + err); }
+
+    var emailed = false, emailError = "";
+    if (form.emailCustomer && d.email) {
+      try { sendBookingUpdateEmail_(d, ref, built.start); emailed = true; }
+      catch (err) { emailError = String(err); console.error("Booking update email failed for " + ref + ": " + err); }
+    }
+    return { ok: true, reference: ref, changes: changes, emailed: emailError ? false : emailed, emailError: emailError };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function sendBookingUpdateEmail_(d, reference, start) {
+  var isAgent = d.channel === "Agent/Landlord";
+  var name = d.name;
+  var body = "Here are the updated details for your booking (ref " + reference + "). When: " + fmtWhen(start) +
+    ". What: " + d.items + ". Total: " + d.total + " (" + d.payment + "). Where: " + d.address + "." +
+    (isAgent ? " Access: " + accessEmailText(d) + "." : "") +
+    " If anything looks wrong, just reply to this email or message us on WhatsApp.";
+  GmailApp.sendEmail(d.email, "Booking updated: " + fmtWhen(start) + " (" + reference + ")",
+    "Hi " + name + ",\n\n" + body + "\n\nThanks,\nEasyClean Somerset", {
+      htmlBody: buildSimpleEmailHtml({ name: name, heading: "Your booking has been updated", body: body }),
+      name: "EasyClean Somerset"
+    });
+}
+
+// ---- Time off: blocking days or hours from the admin app ----
+// A block is just a calendar event (title "Blocked: ...", tagged in its
+// description), so the existing clash check keeps those times off the
+// website, and it shows in your calendar like anything else.
+var BLOCK_TAG = "Added from the EasyClean admin app (Time off).";
+
+function parseIsoDate_(iso) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
+
+function parseHhmm_(hhmm) {
+  var m = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm || ""));
+  if (!m || +m[1] > 23 || +m[2] > 59) return null;
+  return { h: +m[1], m: +m[2] };
+}
+
+function isBlockEvent_(ev) {
+  return String(ev.getDescription() || "").indexOf(BLOCK_TAG) !== -1;
+}
+
+function blockLabel_(ev) {
+  var start = ev.getStartTime(), end = ev.getEndTime();
+  var day = function (d) { return Utilities.formatDate(d, TIMEZONE, "EEE d MMM"); };
+  var time = function (d) { return Utilities.formatDate(d, TIMEZONE, "h:mma").replace("AM", "am").replace("PM", "pm"); };
+  if (ev.isAllDayEvent()) {
+    var last = new Date(end.getTime() - 86400000);
+    return day(start) === day(last) ? day(start) + ", all day" : day(start) + " to " + day(last) + ", all day";
+  }
+  return day(start) + ", " + time(start) + " to " + time(end);
+}
+
+function adminListBlocks() {
+  requireOwner();
+  var now = new Date();
+  var blocks = CalendarApp.getDefaultCalendar()
+    .getEvents(new Date(now.getFullYear(), now.getMonth(), now.getDate()), new Date(now.getTime() + 365 * 86400000))
+    .filter(isBlockEvent_)
+    .map(function (ev) {
+      return { id: ev.getId(), label: blockLabel_(ev), note: String(ev.getTitle() || "").replace(/^Blocked:\s*/, ""), sort: ev.getStartTime().getTime() };
+    });
+  blocks.sort(function (a, b) { return a.sort - b.sort; });
+  return { ok: true, blocks: blocks.map(function (b) { delete b.sort; return b; }) };
+}
+
+// opts: { date: "yyyy-mm-dd", untilDate: "yyyy-mm-dd" (optional, all-day only),
+//         allDay: true/false, from: "HH:mm", to: "HH:mm", note }
+function adminAddBlock(opts) {
+  requireOwner();
+  opts = opts || {};
+  var first = parseIsoDate_(opts.date);
+  if (!first) return { ok: false, error: "Pick a date." };
+  var note = String(opts.note || "").trim().slice(0, 80);
+  var title = "Blocked: " + (note || (opts.allDay ? "day off" : "time off"));
+  var cal = CalendarApp.getDefaultCalendar();
+  var start, end;
+  if (opts.allDay) {
+    var last = opts.untilDate ? parseIsoDate_(opts.untilDate) : first;
+    if (!last || last < first) return { ok: false, error: "The end date is before the start date." };
+    if ((last - first) / 86400000 > 60) return { ok: false, error: "That's more than 60 days. Add it in two parts." };
+    start = first;
+    end = new Date(last.getFullYear(), last.getMonth(), last.getDate() + 1);
+    cal.createAllDayEvent(title, start, end, { description: BLOCK_TAG });
+  } else {
+    var f = parseHhmm_(opts.from), t = parseHhmm_(opts.to);
+    if (!f || !t) return { ok: false, error: "Pick a start and end time." };
+    start = new Date(first.getFullYear(), first.getMonth(), first.getDate(), f.h, f.m);
+    end = new Date(first.getFullYear(), first.getMonth(), first.getDate(), t.h, t.m);
+    if (end <= start) return { ok: false, error: "The end time is before the start time." };
+    cal.createEvent(title, start, end, { description: BLOCK_TAG });
+  }
+  try { refreshSlotsCache(); } catch (err) { console.error("Cache refresh after blocking time failed: " + err); }
+  // Bookings already in that time aren't touched; say so, so they can be
+  // moved or cancelled separately.
+  var clashes = cal.getEvents(start, end).map(referenceFromEvent).filter(function (r) { return r; });
+  return { ok: true, clashes: clashes };
+}
+
+function adminRemoveBlock(id) {
+  requireOwner();
+  var ev = CalendarApp.getDefaultCalendar().getEventById(String(id || ""));
+  if (!ev || !isBlockEvent_(ev)) return { ok: false, error: "Couldn't find that block." };
+  ev.deleteEvent();
+  try { refreshSlotsCache(); } catch (err) { console.error("Cache refresh after removing a block failed: " + err); }
+  return { ok: true };
+}
+
+// ---- Unpaid invoices: reminder to the payer, and Niall's Monday digest ----
+
+// Who an unpaid invoice is chased with: the booker, plus the agency's
+// accounts email for agents (if it's on the Agencies tab and different).
+function sendPaymentReminderEmail(v) {
+  var isAgent = v.Channel === "Agent/Landlord";
+  var name = isAgent ? (v.Name || v["Business name"]) : v.Name;
+  var invoiceNo = formatInvoiceNo(v["Invoice number"]);
+  var amount = v["Cancellation fee"] || v.Total;
+  var due = v["Payment due"] instanceof Date ? Utilities.formatDate(v["Payment due"], TIMEZONE, "d MMMM yyyy") : "";
+  var bank = getBankDetails();
+  var body = "Just a friendly reminder that invoice " + invoiceNo + " for " + amount +
+    " (" + v.Address + ", our ref " + v.Reference + ")" + (due ? " was due on " + due : " is due") + ". " +
+    (bank.complete
+      ? "You can pay by bank transfer to " + bank.accountName + ", sort code " + bank.sortCode + ", account " + bank.accountNumber + ", using " + invoiceNo + " as the reference."
+      : "Please use " + invoiceNo + " as the payment reference, and reply to this email if you need our bank details.") +
+    " If you've already paid, thank you, and please ignore this.";
+  var opts = {
+    htmlBody: buildSimpleEmailHtml({ name: name, heading: "Payment reminder: " + invoiceNo, body: body }),
+    name: "EasyClean Somerset"
+  };
+  var pdf = invoicePdfFromDrive(v["Invoice PDF"]);
+  if (pdf) opts.attachments = [pdf];
+  if (isAgent) {
+    try {
+      var agency = getAgencyBilling(v["Business name"]);
+      if (agency.accountsEmail && agency.accountsEmail.toLowerCase() !== String(v.Email).toLowerCase()) opts.cc = agency.accountsEmail;
+    } catch (err) { /* reminder still goes to the booker */ }
+  }
+  GmailApp.sendEmail(v.Email, "Payment reminder: " + invoiceNo + " (" + amount + ")", "Hi " + name + ",\n\n" + body + "\n\nThanks,\nEasyClean Somerset", opts);
+}
+
+// The saved invoice PDF, re-attached to a reminder. Null if it can't be read.
+function invoicePdfFromDrive(url) {
+  var m = String(url || "").match(/\/d\/([\w-]{10,})|[?&]id=([\w-]{10,})/);
+  if (!m) return null;
+  try {
+    return DriveApp.getFileById(m[1] || m[2]).getBlob();
+  } catch (err) {
+    console.error("Couldn't attach invoice PDF: " + err);
+    return null;
+  }
+}
+
+function adminSendPaymentReminder(token) {
+  requireOwner();
+  var row = findBookingByToken(token);
+  if (!row) return { ok: false, error: "not_found" };
+  var v = row.values;
+  if (!v["Payment due"] || v["Paid on"]) return { ok: false, error: "This invoice isn't unpaid." };
+  if (!v.Email) return { ok: false, error: "No email address on this booking." };
+  sendPaymentReminderEmail(v);
+  var sheet = getCustomerSheet();
+  var header = ensureColumns(sheet, ["Payment reminder sent"]);
+  var now = new Date();
+  sheet.getRange(row.rowIndex, header.indexOf("Payment reminder sent") + 1).setValue(now);
+  return { ok: true, remindedOn: fmtDay(now) };
+}
+
+// Monday morning email to Niall: overdue invoices and those due this week.
+// Sent only when there's something on the list.
+function sendUnpaidDigest() {
+  var sheet = getCustomerSheet();
+  if (!sheet) return false;
+  var data = sheet.getDataRange().getValues();
+  var header = data[0];
+  var now = new Date();
+  var weekAhead = now.getTime() + 7 * 86400000;
+  var overdue = [], dueSoon = [];
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (!v.Reference || !(v["Payment due"] instanceof Date) || v["Paid on"]) continue;
+    var due = v["Payment due"];
+    var who = v.Channel === "Agent/Landlord" ? v["Business name"] : v.Name;
+    var line = formatInvoiceNo(v["Invoice number"]) + "  " + who + "  " + (v["Cancellation fee"] || v.Total);
+    // Compare by calendar day, so something due today isn't "overdue".
+    if (dayKey(due) < dayKey(now)) {
+      var days = Math.floor((now - due) / 86400000);
+      overdue.push({ sort: due.getTime(), text: line + "  (" + days + (days === 1 ? " day" : " days") + " overdue" +
+        (v["Payment reminder sent"] instanceof Date ? ", reminded " + fmtDay(v["Payment reminder sent"]) : "") + ")" });
+    } else if (due.getTime() <= weekAhead) {
+      dueSoon.push({ sort: due.getTime(), text: line + "  (due " + fmtDay(due) + ")" });
+    }
+  }
+  if (!overdue.length && !dueSoon.length) return false;
+  var bySort = function (a, b) { return a.sort - b.sort; };
+  overdue.sort(bySort); dueSoon.sort(bySort);
+  var lines = [];
+  if (overdue.length) lines.push("Overdue:", overdue.map(function (o) { return "  " + o.text; }).join("\n"), "");
+  if (dueSoon.length) lines.push("Due in the next 7 days:", dueSoon.map(function (o) { return "  " + o.text; }).join("\n"), "");
+  var adminUrl = getAdminUrl();
+  lines.push(adminUrl ? "Mark them paid or send a reminder in the admin app (Unpaid tab): " + adminUrl : "Mark them paid or send a reminder in the admin app's Unpaid tab.");
+  notifyOwner("Unpaid invoices: " + overdue.length + " overdue" + (dueSoon.length ? ", " + dueSoon.length + " due this week" : ""), lines.join("\n"));
+  return true;
+}
+
+// ---- Cancelling a booking (admin app) ----
+// Removes the calendar event (so the slot is offered online again), marks
+// the booking cancelled in the sheet, optionally emails the customer, and,
+// for a late cancellation or no access, can invoice the £25 fee from the
+// terms. The fee invoice uses the job's normal invoice columns, so it shows
+// in the Unpaid list and Mark paid / receipts work as usual.
+
+var CANCEL_REASONS = {
+  customer: "Customer cancelled",
+  noaccess: "No access on the day",
+  us: "We cancelled"
+};
+
+// Less than 24 hours before the start (or already started) counts as late.
+function isLateCancellation(start, now) {
+  return start.getTime() - now.getTime() < 24 * 60 * 60 * 1000;
+}
+
+// Deletes every calendar event carrying this booking reference. Returns
+// the start time of the (first) one found, or null.
+function deleteBookingEvents(reference) {
+  var now = new Date();
+  var found = null;
+  CalendarApp.getDefaultCalendar()
+    .getEvents(new Date(now.getTime() - 60 * 86400000), new Date(now.getTime() + 180 * 86400000))
+    .forEach(function (ev) {
+      if (referenceFromEvent(ev) !== reference) return;
+      if (!found) found = ev.getStartTime();
+      ev.deleteEvent();
+    });
+  return found;
+}
+
+// opts: { reason: "customer" | "noaccess" | "us", note, emailCustomer, chargeFee }
+function adminCancelJob(token, opts) {
+  requireOwner();
+  opts = opts || {};
+  if (!CANCEL_REASONS[opts.reason]) return { ok: false, error: "Pick a reason first." };
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (lockErr) {
+    return { ok: false, error: "busy" };
+  }
+  try {
+    return cancelJobLocked_(token, opts);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function cancelJobLocked_(token, opts) {
+  var row = findBookingByToken(token);
+  if (!row) return { ok: false, error: "not_found" };
+  var v = row.values;
+  if (v["Cancelled at"]) return { ok: true, alreadyCancelled: true };
+  if (v["Completed at"]) return { ok: false, error: "This job is already signed off, so it can't be cancelled." };
+
+  var now = new Date();
+  var start = deleteBookingEvents(v.Reference);
+  var late = !!start && isLateCancellation(start, now);
+  // The fee is only ever for a late cancellation or no access, and never
+  // when we're the ones cancelling (terms section 10).
+  var chargeFee = !!opts.chargeFee && opts.reason !== "us" && (late || opts.reason === "noaccess");
+  var whenStr = start ? fmtWhen(start) : bookingTimeText(v);
+
+  try {
+    refreshSlotsCache();
+  } catch (cacheErr) {
+    console.error("Cache refresh after cancelling failed: " + cacheErr);
+  }
+
+  var sheet = getCustomerSheet();
+  var header = ensureColumns(sheet, CANCELLATION_COLUMNS.concat(COMPLETION_COLUMNS));
+  var writes = {
+    "Cancelled at": now,
+    "Cancelled by": CANCEL_REASONS[opts.reason] + (late ? " (less than 24 hours' notice)" : ""),
+    "Cancellation note": String(opts.note || "").slice(0, 500)
+  };
+
+  var fee = null;
+  if (chargeFee) {
+    fee = buildCancellationFeeInvoice(v, opts.reason, whenStr, now);
+    writes["Cancellation fee"] = fee.amount;
+    writes["Invoice number"] = fee.invoiceNumber;
+    writes["Invoice PDF"] = fee.url;
+    writes["Payment due"] = fee.inv.dueDate;
+    writes["Paid on"] = "";
+  }
+  Object.keys(writes).forEach(function (h) {
+    sheet.getRange(row.rowIndex, header.indexOf(h) + 1).setValue(writes[h]);
+  });
+
+  var emailed = false;
+  if (opts.emailCustomer && v.Email) {
+    try {
+      sendCancellationEmail(v, opts.reason, whenStr, fee);
+      emailed = true;
+    } catch (err) {
+      console.error("Cancellation email failed for " + v.Reference + ": " + err);
+      notifyOwner("Cancellation email failed for " + v.Reference,
+        "The booking is cancelled" + (fee ? " and the fee invoice " + fee.inv.invoiceNo + " is in your Unpaid list" : "") +
+        ", but the email to the customer didn't send (" + err + "). Let them know directly.");
+    }
+  }
+  return {
+    ok: true,
+    calendarRemoved: !!start,
+    emailed: emailed,
+    invoiceNo: fee ? fee.inv.invoiceNo : "",
+    feeAmount: fee ? fee.amount : ""
+  };
+}
+
+// Builds, numbers and saves the £25 fee invoice. The PDF reuses the normal
+// invoice layout with a single fee line; the booking itself is untouched.
+function buildCancellationFeeInvoice(v, reason, whenStr, now) {
+  var amount = "£" + LATE_CANCELLATION_FEE;
+  var invoiceNumber = nextInvoiceNumber(true); // already holding the script lock
+  var inv = buildInvoiceContext(v, invoiceNumber, now);
+  inv.paymentDue = true;
+  inv.dueOnCompletion = false;
+  inv.dueDate = new Date(now.getTime() + CANCELLATION_FEE_TERMS_DAYS * 24 * 60 * 60 * 1000);
+  inv.bank = getBankDetails();
+  inv.workAtLabel = "Booking at";
+  var label = reason === "noaccess" ? "Call-out fee (no access)" : "Late cancellation fee";
+  var feeRow = {};
+  Object.keys(v).forEach(function (k) { feeRow[k] = v[k]; });
+  // One invoice line. No ", " in it: the invoice splits item lines on that.
+  var whenPart = whenStr ? " on " + String(whenStr).replace(/, /g, " at ") : "";
+  feeRow.Items = label + " for booking " + v.Reference + whenPart + ": " + amount;
+  feeRow.Total = amount;
+  var blob = null, url = "";
+  try {
+    blob = buildInvoicePdfBlob(feeRow, inv);
+  } catch (err) {
+    console.error("Fee invoice PDF failed for " + v.Reference + ": " + err);
+    notifyOwner("Fee invoice PDF failed for " + v.Reference, "The booking is cancelled and " + inv.invoiceNo + " is recorded in your Unpaid list, but its PDF couldn't be created (" + err + "). Send the customer the fee details by hand.");
+  }
+  if (blob) {
+    try {
+      url = saveDocumentToDrive(INVOICES_FOLDER_NAME, now, blob);
+    } catch (err) {
+      url = "Not saved to Drive (see execution log)";
+      console.error("Fee invoice Drive save failed for " + v.Reference + ": " + err);
+    }
+  }
+  return { amount: amount, invoiceNumber: invoiceNumber, inv: inv, blob: blob, url: url };
+}
+
+function sendCancellationEmail(v, reason, whenStr, fee) {
+  var isAgent = v.Channel === "Agent/Landlord";
+  var name = isAgent ? (v.Name || v["Business name"]) : v.Name;
+  var what = "your booking" + (whenStr ? " for " + whenStr : "") + " at " + v.Address + " (ref " + v.Reference + ")";
+  var heading, body;
+  if (reason === "us") {
+    heading = "We've had to cancel your booking";
+    body = "Sorry, we've had to cancel " + what + ". There's nothing to pay. We'll be in touch to find a new time, or you can rebook online at easycleansomerset.co.uk whenever suits.";
+  } else if (reason === "noaccess") {
+    heading = "We couldn't get in today";
+    body = "We weren't able to get into the property for " + what + ", so the booking has been cancelled.";
+  } else {
+    heading = "Your booking is cancelled";
+    body = "As requested, " + what + " has been cancelled.";
+  }
+  if (fee) {
+    var dueStr = Utilities.formatDate(fee.inv.dueDate, TIMEZONE, "d MMMM yyyy");
+    body += " " + (reason === "noaccess"
+      ? "As set out in our terms (section 5), a " + fee.amount + " call-out fee applies when we can't get access."
+      : "As it was cancelled with less than 24 hours' notice, a " + fee.amount + " late cancellation fee applies, as set out in our terms (section 5).") +
+      " Invoice " + fee.inv.invoiceNo + " is attached, payment due by " + dueStr + ". Please use " + fee.inv.invoiceNo + " as the payment reference.";
+  }
+  if (reason !== "us") body += " If you'd like to rebook, you can book online at easycleansomerset.co.uk or just reply to this email.";
+
+  var opts = {
+    htmlBody: buildSimpleEmailHtml({ name: name, heading: heading, body: body }),
+    name: "EasyClean Somerset"
+  };
+  if (fee && fee.blob) opts.attachments = [fee.blob];
+  if (isAgent && fee && fee.inv.accountsEmail && fee.inv.accountsEmail.toLowerCase() !== String(v.Email).toLowerCase()) {
+    opts.cc = fee.inv.accountsEmail;
+  }
+  var subject = "Booking cancelled: " + v.Reference + (fee ? " (Invoice " + fee.inv.invoiceNo + ")" : "");
+  GmailApp.sendEmail(v.Email, subject, "Hi " + name + ",\n\n" + body + "\n\nThanks,\nEasyClean Somerset", opts);
+}
+
+function sendPaymentReceipt(v, paidOn) {
+  var isAgent = v.Channel === "Agent/Landlord";
+  var invoiceNo = formatInvoiceNo(v["Invoice number"]);
+  var name = isAgent ? (v.Name || v["Business name"]) : v.Name;
+  var dateStr = Utilities.formatDate(paidOn, TIMEZONE, "d MMMM yyyy");
+  var line = "We've received your payment of " + (v["Cancellation fee"] || v.Total) + " for invoice " + invoiceNo +
+    " (" + v.Address + ", our ref " + v.Reference + "), paid " + dateStr + ". Nothing further to pay.";
+  var opts = {
+    htmlBody: buildSimpleEmailHtml({ name: name, heading: "Payment received, thank you", body: line }),
+    name: "EasyClean Somerset"
+  };
+  if (isAgent) {
+    try {
+      var agency = getAgencyBilling(v["Business name"]);
+      if (agency.accountsEmail && agency.accountsEmail.toLowerCase() !== String(v.Email).toLowerCase()) opts.cc = agency.accountsEmail;
+    } catch (err) { /* receipt still goes to the booker */ }
+  }
+  GmailApp.sendEmail(v.Email, "Payment received: " + invoiceNo, "Hi " + name + ",\n\n" + line + "\n\nThanks,\nEasyClean Somerset", opts);
+}
+
+// Same branded shell as the other customer emails, for short one-message
+// emails (currently just the payment receipt).
+function buildSimpleEmailHtml(d) {
+  var esc = escHtml;
+  var INK = "#12232B", TEAL = "#0E7C86", PAPER = "#F5F7F6", SURFACE = "#FFFFFF";
+  var LINE = "#DCE3E2", SLATE = "#5C6F73", ON_INK = "#F5F7F6", STAMP = "#B5461E";
+  var SANS = "Arial,Helvetica,sans-serif";
+  var LOGO_URL = SITE_URL + "/apple-touch-icon.png";
+  return (
+    '<div style="background:' + PAPER + ';padding:40px 16px;">' +
+      '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;margin:0 auto;">' +
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+        '<tr><td style="background:' + INK + ';padding:26px 28px;text-align:center;">' +
+          '<img src="' + LOGO_URL + '" width="36" height="36" alt="EasyClean Somerset" style="display:inline-block;vertical-align:middle;width:36px;height:36px;" />' +
+          '<span style="display:inline-block;vertical-align:middle;margin-left:12px;font-family:' + SANS + ';font-weight:800;font-size:18px;text-transform:uppercase;color:' + ON_INK + ';">Easy<span style="color:' + TEAL + ';">Clean</span> Somerset</span>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:30px 28px;">' +
+          '<p style="margin:0 0 6px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Hi ' + esc(d.name) + ',</p>' +
+          '<h1 style="margin:0 0 6px;font-family:' + SANS + ';font-weight:800;font-size:24px;color:' + INK + ';">' + esc(d.heading) + '</h1>' +
+          '<div style="width:36px;height:3px;background:' + STAMP + ';margin:0 0 18px;font-size:3px;line-height:3px;">&nbsp;</div>' +
+          '<p style="margin:0;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + SLATE + ';">' + esc(d.body) + '</p>' +
+        '</td></tr>' +
+        '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:20px 28px;text-align:center;font-family:' + SANS + ';font-weight:800;font-size:12.5px;text-transform:uppercase;color:' + SLATE + ';">EasyClean Somerset</td></tr>' +
+        '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
+      '</table>' +
+    '</div>'
+  );
+}
+
+
+// ---- Agent access arrangements ----
+// Agents either name someone who'll be on site, or choose to arrange access
+// with us themselves (keys, lockbox, tenant) at least 24 hours before.
+function accessLabel(data) {
+  return data.accessArrange ? "Agent arranging (24h notice)" : "Someone on site";
+}
+
+function accessEmailText(data) {
+  return data.accessArrange
+    ? "To arrange. Please get in touch at least 24 hours before the clean to let us know how we'll get in (keys, lockbox code or the tenant's details). Reply to this email or WhatsApp us."
+    : data.siteContactName + " (" + data.siteContactPhone + ") will let us in.";
+}
+
+// ============================================================
+// Booking safeguards: slot check, server-side pricing, rate cap,
+// and alerts to Niall
+// ============================================================
+
+// More booking attempts than this within an hour pauses online booking
+// (customers get the WhatsApp fallback) and emails Niall. A real busy hour
+// for a one-van business is well under this.
+var MAX_BOOKINGS_PER_HOUR = 8;   // real bookings an hour before online booking pauses
+var MAX_ATTEMPTS_PER_HOUR = 40;  // all attempts (including refused ones) an hour
+
+// Two limits per clock hour: real bookings made (MAX_BOOKINGS_PER_HOUR) and
+// all attempts that got past the basic checks (MAX_ATTEMPTS_PER_HOUR, a
+// much higher number). Junk requests that are refused can no longer switch
+// online booking off on their own. Returns false (fine), true (over the
+// limit, alert Niall) or "quiet" (over the limit, already alerted this hour).
+function bookingRateExceeded() {
+  var cache = CacheService.getScriptCache();
+  var hour = Utilities.formatDate(new Date(), TIMEZONE, "yyyyMMddHH");
+  var attemptsKey = "bookingAttempts_" + hour;
+  var attempts = parseInt(cache.get(attemptsKey) || "0", 10) + 1;
+  cache.put(attemptsKey, String(attempts), 3700);
+  var made = parseInt(cache.get("bookingsMade_" + hour) || "0", 10);
+  if (made < MAX_BOOKINGS_PER_HOUR && attempts <= MAX_ATTEMPTS_PER_HOUR) return false;
+  // Only email once per hour, not on every turned-away attempt.
+  if (cache.get(attemptsKey + "_alerted")) return "quiet";
+  cache.put(attemptsKey + "_alerted", "1", 3700);
+  return true;
+}
+
+function countBooking() {
+  var cache = CacheService.getScriptCache();
+  var key = "bookingsMade_" + Utilities.formatDate(new Date(), TIMEZONE, "yyyyMMddHH");
+  cache.put(key, String(parseInt(cache.get(key) || "0", 10) + 1), 3700);
+}
+
+// Is this a start time we'd actually offer? Same rules as getAvailableSlots()
+// (a listed weekday start time, at least LEAD_TIME_HOURS ahead, within
+// DAYS_AHEAD), with an hour's grace on the lead time so someone who loaded
+// the page a while ago and books a slot that's just crossed the 24-hour
+// line isn't turned away. Clashes are checked separately against the
+// calendar.
+function isOfferableSlot(start) {
+  if (!(start instanceof Date) || isNaN(start.getTime())) return false;
+  var now = Date.now();
+  if (start.getTime() < now + (LEAD_TIME_HOURS - 1) * 3600000) return false;
+  if (start.getTime() > now + (DAYS_AHEAD + 1) * 86400000) return false;
+  if (isClosedDay(start)) return false;
+  var hhmm = Utilities.formatDate(start, TIMEZONE, "HH:mm");
+  var weekday = parseInt(Utilities.formatDate(start, TIMEZONE, "u"), 10) % 7; // 1=Mon..7=Sun -> Sun=0
+  return (WEEKLY_SLOTS[weekday] || []).indexOf(hhmm) !== -1;
+}
+
+// ---- Bank holidays and other closed days ----
+// England and Wales bank holidays come from GOV.UK's official list
+// (www.gov.uk/bank-holidays.json), read once a day at most and remembered.
+// If GOV.UK can't be reached, the last list read is used, and failing that
+// the built-in list below (checked against GOV.UK on 3 Oct 2026). Christmas
+// Day, Boxing Day and New Year's Day are always closed, whatever the
+// weekday. Anything else (holidays, days off) is blocked from the admin
+// app's "Time off" tab, or by any event in your calendar.
+var BANK_HOLIDAYS_URL = "https://www.gov.uk/bank-holidays.json";
+var BANK_HOLIDAYS_BUILT_IN = [
+  "2026-01-01", "2026-04-03", "2026-04-06", "2026-05-04", "2026-05-25", "2026-08-31", "2026-12-25", "2026-12-28",
+  "2027-01-01", "2027-03-26", "2027-03-29", "2027-05-03", "2027-05-31", "2027-08-30", "2027-12-27", "2027-12-28"
+];
+var ALWAYS_CLOSED_DAYS = ["12-25", "12-26", "01-01"]; // MM-dd
+
+function getBankHolidays() {
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get("bankHolidays_v1");
+  if (hit) return JSON.parse(hit);
+  var props = PropertiesService.getScriptProperties();
+  var dates = null;
+  try {
+    var res = UrlFetchApp.fetch(BANK_HOLIDAYS_URL, { muteHttpExceptions: true, followRedirects: true });
+    if (res.getResponseCode() === 200) {
+      var ew = JSON.parse(res.getContentText())["england-and-wales"];
+      dates = (ew && ew.events || []).map(function (e) { return e.date; }).filter(function (d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); });
+      if (dates.length) props.setProperty("BANK_HOLIDAYS_LAST_GOOD", JSON.stringify(dates));
+      else dates = null;
+    }
+  } catch (err) {
+    console.error("Bank holiday list unavailable: " + err);
+  }
+  if (!dates) {
+    try { dates = JSON.parse(props.getProperty("BANK_HOLIDAYS_LAST_GOOD") || "null"); } catch (e) { dates = null; }
+  }
+  var all = BANK_HOLIDAYS_BUILT_IN.concat(dates || []).filter(function (d, i, a) { return a.indexOf(d) === i; });
+  cache.put("bankHolidays_v1", JSON.stringify(all), 21600);
+  return all;
+}
+
+// Set of closed days, keyed both "yyyy-MM-dd" (bank holidays) and "MM-dd"
+// (the always-closed days), for quick lookups while building slots.
+function closedDaySet() {
+  var set = {};
+  getBankHolidays().forEach(function (d) { set[d] = true; });
+  ALWAYS_CLOSED_DAYS.forEach(function (d) { set[d] = true; });
+  return set;
+}
+
+function isClosedDay(date) {
+  var set = closedDaySet();
+  return !!(set[Utilities.formatDate(date, TIMEZONE, "yyyy-MM-dd")] || set[Utilities.formatDate(date, TIMEZONE, "MM-dd")]);
+}
+
+// ---- Server-side pricing ----
+// The price list customers see lives in the website pages themselves
+// (index.html for homeowners, agents.html for agents). Rather than keep a
+// second copy here that could drift, the backend reads the live page's
+// price rows (cached for an hour) and prices every booking from them. So a
+// price change is still made in one place on the website, and the backend
+// picks it up on its own.
+
+var FIXED_OVERHEAD_MINS = 45; // must match FIXED_OVERHEAD_MINS in the website's JS
+var PRICE_CACHE_SECONDS = 3600;
+
+function priceListPage(channel) {
+  return channel === "Agent/Landlord" ? "agents.html" : "index.html";
+}
+
+function getPriceList(channel, skipCache) {
+  var page = priceListPage(channel);
+  var key = "priceList_v1_" + page;
+  var cache = CacheService.getScriptCache();
+  if (!skipCache) {
+    var hit = cache.get(key);
+    if (hit) return JSON.parse(hit);
+  }
+  var res = UrlFetchApp.fetch(SITE_URL + "/" + page, { muteHttpExceptions: true, followRedirects: true });
+  if (res.getResponseCode() !== 200) throw new Error("Price page returned " + res.getResponseCode());
+  var list = parsePriceRows(res.getContentText());
+  if (!Object.keys(list).length) throw new Error("No price rows found on " + page);
+  cache.put(key, JSON.stringify(list), PRICE_CACHE_SECONDS);
+  return list;
+}
+
+// Reads every <div class="item-row" data-item=".." data-price=".." data-mins="..">.
+function parsePriceRows(html) {
+  var list = {};
+  var re = /<div class="item-row"([^>]*)>/g, m;
+  while ((m = re.exec(html))) {
+    var attrs = m[1];
+    var name = (attrs.match(/data-item="([^"]*)"/) || [])[1];
+    var price = parseInt((attrs.match(/data-price="(\d+)"/) || [])[1], 10);
+    var mins = parseInt((attrs.match(/data-mins="(\d+)"/) || [])[1], 10);
+    if (name && !isNaN(price) && !isNaN(mins)) list[decodeHtmlAttr(name)] = { price: price, mins: mins };
+  }
+  return list;
+}
+
+function decodeHtmlAttr(s) {
+  return String(s).replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+}
+
+// What the customer asked for, as [{item, qty}]. Prefers the structured
+// list newer pages send; falls back to reading the "2× Medium room: £90"
+// text older cached pages send. Prices in that text are ignored.
+function requestedLines(data) {
+  if (Array.isArray(data.lineItems) && data.lineItems.length) {
+    return data.lineItems.map(function (l) { return { item: String(l.item || ""), qty: parseInt(l.qty, 10) }; });
+  }
+  return String(data.items || "").split(", ").filter(String).map(function (line) {
+    var m = line.match(/^(\d+)\s*[×x]\s*(.+?)(?::\s*£[\d,]+)?$/);
+    return m ? { item: m[2].trim(), qty: parseInt(m[1], 10) } : { item: line, qty: NaN };
+  });
+}
+
+function formatGBPServer(n) {
+  return "£" + String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function formatMinsServer(mins) {
+  var h = Math.floor(mins / 60), m = mins % 60;
+  if (h === 0) return m + " min";
+  if (m === 0) return h + "h";
+  return h + "h " + m + "m";
+}
+
+// Returns { ok, items, total, estTime, verified, adjusted, pageTotal } or
+// { ok:false, error }. "verified:false" means the price list couldn't be
+// read at all, so the browser's figures were used and Niall is told.
+function priceBooking(data) {
+  var lines = requestedLines(data);
+  if (!lines.length) return { ok: false, error: "missing_fields" };
+  for (var i = 0; i < lines.length; i++) {
+    if (!lines[i].item || !(lines[i].qty >= 1 && lines[i].qty <= 20)) return { ok: false, error: "bad_items" };
+  }
+  var list;
+  try {
+    list = getPriceList(data.channel);
+    // An item we don't recognise may just mean the price list changed in
+    // the last hour: re-read it fresh once before refusing.
+    if (lines.some(function (l) { return !list[l.item]; })) list = getPriceList(data.channel, true);
+  } catch (err) {
+    console.error("Price list unavailable: " + err);
+    return { ok: true, verified: false, items: data.items, total: data.total, estTime: data.estTime, pageTotal: data.total };
+  }
+  var total = 0, mins = 0, text = [];
+  for (var j = 0; j < lines.length; j++) {
+    var p = list[lines[j].item];
+    if (!p) return { ok: false, error: "unknown_item" };
+    var lineTotal = p.price * lines[j].qty;
+    total += lineTotal;
+    mins += p.mins * lines[j].qty;
+    text.push(lines[j].qty + "× " + lines[j].item + ": " + formatGBPServer(lineTotal));
+  }
+  mins += FIXED_OVERHEAD_MINS;
+  var totalStr = formatGBPServer(total);
+  return {
+    ok: true, verified: true,
+    items: text.join(", "),
+    total: totalStr,
+    estTime: "~" + formatMinsServer(mins),
+    pageTotal: data.total,
+    adjusted: String(data.total || "") !== totalStr
+  };
+}
+
+/**
+ * Run once after pasting this version (function dropdown -> Run). It asks
+ * Google for the new "connect to an external service" permission the price
+ * check needs, and logs the price lists it reads from the live site. Until
+ * this permission is granted, bookings fall back to the browser's prices
+ * and you get an email saying so.
+ */
+function checkPriceList() {
+  ["Consumer", "Agent/Landlord"].forEach(function (channel) {
+    var list = getPriceList(channel, true);
+    Logger.log(priceListPage(channel) + ": " + Object.keys(list).length + " items");
+    Object.keys(list).forEach(function (k) { Logger.log("  " + k + ": £" + list[k].price + ", " + list[k].mins + " min"); });
+  });
+  Logger.log("Service area: " + getServiceArea(true).join(", "));
+}
+
+// ---- Service area ----
+// The list of postcode districts lives in service-area.js on the website,
+// so the page and this check always agree and there's one place to edit.
+// Read with UrlFetchApp and cached for an hour. If the file can't be read,
+// the booking goes through and Niall's new-booking email says the area
+// wasn't checked (same approach as the price list).
+
+var AREA_CACHE_SECONDS = 3600;
+
+function getServiceArea(skipCache) {
+  var key = "serviceArea_v1";
+  var cache = CacheService.getScriptCache();
+  if (!skipCache) {
+    var hit = cache.get(key);
+    if (hit) return JSON.parse(hit);
+  }
+  var res = UrlFetchApp.fetch(SITE_URL + "/service-area.js", { muteHttpExceptions: true, followRedirects: true });
+  if (res.getResponseCode() !== 200) throw new Error("service-area.js returned " + res.getResponseCode());
+  var list = parseServiceArea(res.getContentText());
+  if (!list.length) throw new Error("No postcode districts found in service-area.js");
+  cache.put(key, JSON.stringify(list), AREA_CACHE_SECONDS);
+  return list;
+}
+
+// Reads the quoted districts inside window.EC_SERVICE_AREA = [ ... ];
+function parseServiceArea(js) {
+  var m = String(js).match(/EC_SERVICE_AREA\s*=\s*\[([\s\S]*?)\]/);
+  if (!m) return [];
+  var body = m[1].replace(/\/\/[^\n]*/g, "");
+  var out = [], re = /["']([A-Za-z]{1,2}[0-9][A-Za-z0-9]?)["']/g, d;
+  while ((d = re.exec(body))) out.push(d[1].toUpperCase());
+  return out;
+}
+
+// The district (first half) of a full UK postcode, or null.
+function postcodeOutward(raw) {
+  var s = String(raw || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  var m = s.match(/^([A-Z]{1,2}[0-9][A-Z0-9]?)([0-9][A-Z]{2})$/);
+  return m ? m[1] : null;
+}
+
+// Newer pages send the postcode on its own; older cached pages only send
+// it on the end of the address ("1 High St, BA3 2EE").
+function bookingPostcode(data) {
+  if (data.postcode) return data.postcode;
+  var parts = String(data.address || "").split(",");
+  return parts[parts.length - 1];
+}
+
+function checkServiceArea(data) {
+  var outward = postcodeOutward(bookingPostcode(data));
+  if (!outward) return { ok: false, error: "bad_postcode" };
+  var list;
+  try {
+    list = getServiceArea(false);
+  } catch (err) {
+    console.error("Service area check skipped: " + err);
+    return { ok: true, verified: false };
+  }
+  if (list.indexOf(outward) === -1) return { ok: false, error: "out_of_area", outward: outward };
+  return { ok: true, verified: true };
+}
+
+// ---- Alerts to Niall ----
+
+function ownerEmail() {
+  return Session.getEffectiveUser().getEmail();
+}
+
+// Never throws: an alert failing must not break whatever triggered it.
+function notifyOwner(subject, body) {
+  try {
+    var to = ownerEmail();
+    if (!to) return;
+    GmailApp.sendEmail(to, "[EasyClean] " + subject, body + "\n\n(Automatic message from your booking system.)", { name: "EasyClean booking system" });
+  } catch (err) {
+    console.error("notifyOwner failed: " + err);
+  }
+}
+
+function sendNewBookingAlert(data, reference, jobToken, start, priced) {
+  var when = Utilities.formatDate(start, TIMEZONE, "EEE d MMM 'at' h:mma").replace("AM", "am").replace("PM", "pm");
+  var isAgent = data.channel === "Agent/Landlord";
+  var who = isAgent ? data.businessName + " (" + data.name + ")" : data.name;
+  var lines = [
+    who + " booked " + when + ".",
+    "",
+    "Reference: " + reference,
+    "What: " + data.items,
+    "Total: " + data.total + " (" + data.payment + ")",
+    "Est. time: " + (data.estTime || "not specified"),
+    "Where: " + data.address,
+    "Phone: " + data.phone,
+    "Email: " + data.email
+  ];
+  if (isAgent) lines.push("Access: " + accessEmailText(data));
+  if (data.referralCode) lines.push("Referral/offer code: " + data.referralCode);
+  if (data.agencyId) lines.push("Agent's reference: " + data.agencyId);
+  if (priced && priced.adjusted) lines.push("", "NOTE: the page showed " + priced.pageTotal + " but the price list gives " + data.total + ". Booked at " + data.total + ".");
+  if (data.areaUnchecked) lines.push("", "NOTE: the service area list couldn't be read, so the postcode wasn't checked. Worth a quick look at where this is.");
+  if (priced && priced.verified === false) lines.push("", "NOTE: the price list couldn't be checked, so this was booked at the price the page sent. Worth a quick check.");
+  var link = adminJobLink(jobToken, reference);
+  lines.push("", "Open in admin: " + link);
+  notifyOwner("New booking: " + who + ", " + when + ", " + data.total, lines.join("\n"));
+}
