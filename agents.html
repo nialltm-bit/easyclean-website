@@ -265,6 +265,15 @@ layout: null
   }
   .hero-list li:last-child { margin-bottom: 0; }
   .hero-ctas { display: flex; gap: 14px; margin-top: 32px; flex-wrap: wrap; }
+  /* On phones the button goes straight under the heading, so it's on screen
+     without scrolling and clear of the cookie notice. It's the only thing in
+     the hero you can tab to, so the keyboard order doesn't change. */
+  @media (max-width: 480px) {
+    .hero-grid { display: flex; flex-direction: column; }
+    .hero-ctas { order: 1; margin-top: 20px; }
+    .hero-list { order: 2; margin-top: 24px; }
+    .hero-note { order: 3; }
+  }
   .hero-note {
     margin-top: 22px;
     font-size: 13.5px;
@@ -805,6 +814,44 @@ layout: null
   .area-note { margin: 16px 0 0; font-size: 14.5px; color: var(--ink-soft); }
   .summary-vat { margin-top: 6px; font-size: 12.5px; color: color-mix(in srgb, var(--on-ink) 65%, transparent); }
 
+  /* ============ STICKY HEADER CLEARANCE ============ */
+  /* Links that jump down the page stop this far from the top, so the sticky
+     header doesn't cover what they jump to. The header is taller when its
+     links wrap: 103px up to about 1000px wide, 123px on phones. */
+  #prices, #book { scroll-margin-top: 90px; }
+  @media (max-width: 1000px) {
+    #prices, #book, .item-group, .seal, .booking-confirmed { scroll-margin-top: 112px; }
+  }
+  @media (max-width: 460px) {
+    #prices, #book, .item-group, .seal, .booking-confirmed { scroll-margin-top: 132px; }
+  }
+
+  /* ============ PHONE BASKET BAR ============ */
+  /* Phones and small tablets only, where the basket sits below the price
+     list. booking.js shows it once something's in the basket, and hides it
+     while the basket or the booking form is on screen. */
+  .basket-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: var(--ink);
+    color: var(--on-ink);
+    box-shadow: 0 -4px 16px rgba(0,0,0,.18);
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .basket-bar[hidden] { display: none; }
+  .basket-bar .btn { padding: 12px 18px; font-size: 15px; }
+  @media (min-width: 901px) { .basket-bar { display: none; } }
+  @media (max-width: 900px) { body.has-basket-bar { padding-bottom: 72px; } }
+
   /* ============ SKIP LINK ============ */
   /* The first thing a keyboard user reaches: jumps past the header to the
      page's main content. Off-screen until it has focus. */
@@ -907,7 +954,7 @@ layout: null
           <p>Same-day response.</p>
           <ul>
             <li>Send us a couple of photos over WhatsApp</li>
-            <li>No WhatsApp? We&#8217;ll take it by text instead</li>
+            <li>No WhatsApp? Text us on <a href="sms:+447873212249">07873 212249</a> instead</li>
             <li>Same-day response with a firm price</li>
           </ul>
           <a id="wa-quick-quote" href="#" target="_blank" rel="noopener" class="btn btn-wa">Quick Quote on WhatsApp</a>
@@ -1091,6 +1138,13 @@ layout: null
       </div>
     </div>
   </section>
+
+  <!-- ============ PHONE BASKET BAR ============ -->
+  <!-- Phones only. booking.js fills in the total and shows it. -->
+  <div class="basket-bar" id="basket-bar" hidden>
+    <span>Basket: <span class="mono" id="basket-bar-total">£0</span></span>
+    <a href="#book" class="btn btn-primary">Continue to booking</a>
+  </div>
 </main>
 
 <footer class="site">
@@ -1113,7 +1167,9 @@ layout: null
       <div>
         <h2>Contact</h2>
         <p>WhatsApp: <a class="mono" href="https://wa.me/447873212249" target="_blank" rel="noopener">07873 212249</a></p>
-        <p><a href="mailto:easycleansomerset@gmail.com">easycleansomerset@gmail.com</a></p>
+        <p>Call: <a class="mono" href="tel:+447873212249">07873 212249</a></p>
+        <p>Text: <a class="mono" href="sms:+447873212249">07873 212249</a></p>
+        <p>Email: <a href="mailto:easycleansomerset@gmail.com">easycleansomerset@gmail.com</a></p>
         <p><a href="/">Booking for your own home instead?</a></p>
       </div>
     </div>

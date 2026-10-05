@@ -173,6 +173,7 @@ window.ecBooking = function (config) {
     currentSelection = { lines: lines, total: total, totalMins: totalMins };
     updateBookingSection();
     updateGroupCounts();
+    updateBasketBar();
   }
 
   // ---- Collapsible item-group sections ----
@@ -626,6 +627,8 @@ window.ecBooking = function (config) {
     // carry on from here rather than the top of the page.
     confirmedEl.setAttribute("tabindex", "-1");
     confirmedEl.focus({ preventScroll: true });
+
+    updateBasketBar();
   }
 
   function value(id) {
@@ -735,6 +738,32 @@ window.ecBooking = function (config) {
     }, { once: true });
   }
   highlightServiceAnchor();
+
+  // ---- Basket bar on phones ----
+  // On narrow screens the basket sits below the whole price list. This bar
+  // keeps the total and a way on to booking in reach while choosing items.
+  // It hides while the basket or the booking form is on screen, and once a
+  // booking has gone through. The CSS keeps it off wider screens.
+  var basketBar = document.getElementById("basket-bar");
+  var onScreen = {};
+  function updateBasketBar() {
+    if (!basketBar) return;
+    var show = currentSelection.total > 0 && !confirmedBookingRef &&
+      !onScreen["summary-card"] && !onScreen["book"];
+    document.getElementById("basket-bar-total").textContent = formatGBP(currentSelection.total);
+    basketBar.hidden = !show;
+    document.body.classList.toggle("has-basket-bar", show);
+  }
+  if (basketBar && "IntersectionObserver" in window) {
+    var barWatcher = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) { onScreen[entry.target.id] = entry.isIntersecting; });
+      updateBasketBar();
+    });
+    barWatcher.observe(document.getElementById("summary-card"));
+    barWatcher.observe(document.getElementById("book"));
+  } else {
+    basketBar = null; // can't tell when it would be in the way, so leave it off
+  }
 
   render();
 };
