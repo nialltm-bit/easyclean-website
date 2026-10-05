@@ -110,9 +110,9 @@ async function bookingPage(browser, base, file) {
   await page.fill("#bf-postcode", "SW1A 1AA");
   check("postcode outside the area offers WhatsApp", (await page.textContent("#bf-area-msg")).includes("SW1A") && (await page.$$("#bf-area-msg a.btn-wa")).length === 1);
   check("Confirm stays off outside the area", await confirmOff());
-  await page.fill("#bf-postcode", "ba32ee");
+  await page.fill("#bf-postcode", "ba11aa");
   await page.focus("#bf-name");
-  check("postcode is tidied when leaving the box", (await page.inputValue("#bf-postcode")) === "BA3 2EE");
+  check("postcode is tidied when leaving the box", (await page.inputValue("#bf-postcode")) === "BA1 1AA");
   if (agents) {
     check("agent page: Confirm stays off until the site contact is filled in", await confirmOff());
     await page.check('input[name="bf-access"][value="arrange"]');
@@ -160,7 +160,7 @@ async function bookingPage(browser, base, file) {
   const sent = fake.bookings[fake.bookings.length - 1];
   check("booking sends the chosen time", sent.startTime === "2026-10-06T08:00:00Z" && sent.slotLabel === "Tue 6 Oct, 9:00am", [sent.startTime, sent.slotLabel]);
   check("booking sends the basket for re-pricing", JSON.stringify(sent.lineItems) === JSON.stringify([{ item: "Small room", qty: 2 }, { item: "Armchair", qty: 1 }]), sent.lineItems);
-  check("booking sends the full address with postcode", sent.address === "1 High Street, BA3 2EE" && sent.postcode === "BA3 2EE");
+  check("booking sends the full address with postcode", sent.address === "1 High Street, BA1 1AA" && sent.postcode === "BA1 1AA");
   if (agents) {
     check("agent booking: channel and invoice payment", sent.channel === "Agent/Landlord" && sent.payment === "Invoice, 14 days");
     check("agent booking: business, account reference and arranged access", sent.businessName === "Acme Lettings" && sent.agencyId === "REF-9" && sent.accessArrange === true && sent.siteContactName === "" && sent.siteContactPhone === "");

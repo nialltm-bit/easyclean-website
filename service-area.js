@@ -7,7 +7,7 @@
  * every booking, so there is nothing to change anywhere else.
  *
  * Each entry is a postcode district: the first half of a postcode
- * (BA3 2EE is in district BA3). To add an area, add its district in quotes
+ * (BA1 1AA is in district BA1). To add an area, add its district in quotes
  * with a comma after it. To remove one, delete its line.
  * The website picks up a change within about 10 minutes, the booking
  * system within about an hour.
