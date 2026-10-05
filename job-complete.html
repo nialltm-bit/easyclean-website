@@ -6,7 +6,6 @@
 <title>Job sign-off | EasyClean Somerset</title>
 <meta name="robots" content="noindex, nofollow">
 
-<meta name="robots" content="noindex, nofollow">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -211,12 +210,18 @@
     var canvas = document.getElementById("pad");
     var ctx = canvas.getContext("2d");
     var drawing = false;
-    var touched = false;
+    var last = null;
+    // Length of line drawn so far, in CSS pixels. A tap or a dot isn't a
+    // signature, so Confirm only switches on once there's a real stroke.
+    var inkLength = 0;
+    var MIN_INK = 30;
+    var padWidth = 0;
     var submitBtn = document.getElementById("btn-submit");
 
     function resizeCanvas() {
       var ratio = window.devicePixelRatio || 1;
       var rect = canvas.getBoundingClientRect();
+      padWidth = rect.width;
       canvas.width = rect.width * ratio;
       canvas.height = rect.height * ratio;
       ctx.scale(ratio, ratio);
@@ -233,32 +238,46 @@
       return { x: e.clientX - rect.left, y: e.clientY - rect.top };
     }
 
+    function clearPad() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawing = false;
+      inkLength = 0;
+      submitBtn.disabled = true;
+    }
+
+    // Rotating the phone changes the pad's width, and the drawing can't be
+    // stretched to the new shape without distorting it, so start it again.
+    // Height-only resizes (the mobile address bar showing or hiding) are
+    // ignored, since the pad's height is fixed.
+    window.addEventListener("resize", function () {
+      if (canvas.getBoundingClientRect().width === padWidth) return;
+      resizeCanvas();
+      clearPad();
+    });
+
     canvas.addEventListener("pointerdown", function (e) {
       drawing = true;
-      touched = true;
-      var p = pos(e);
+      last = pos(e);
       ctx.beginPath();
-      ctx.moveTo(p.x, p.y);
-      submitBtn.disabled = false;
+      ctx.moveTo(last.x, last.y);
     });
     canvas.addEventListener("pointermove", function (e) {
       if (!drawing) return;
       var p = pos(e);
       ctx.lineTo(p.x, p.y);
       ctx.stroke();
+      inkLength += Math.sqrt(Math.pow(p.x - last.x, 2) + Math.pow(p.y - last.y, 2));
+      last = p;
+      if (inkLength >= MIN_INK) submitBtn.disabled = false;
     });
     ["pointerup", "pointerleave", "pointercancel"].forEach(function (evt) {
       canvas.addEventListener(evt, function () { drawing = false; });
     });
 
-    document.getElementById("btn-clear").addEventListener("click", function () {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      touched = false;
-      submitBtn.disabled = true;
-    });
+    document.getElementById("btn-clear").addEventListener("click", clearPad);
 
     submitBtn.addEventListener("click", function () {
-      if (!touched) return;
+      if (inkLength < MIN_INK) return;
       submitBtn.disabled = true;
       submitBtn.textContent = "Sending…";
       fetch(APPS_SCRIPT_URL, {
@@ -272,7 +291,7 @@
           showState(data.alreadyCompleted ? "state-already" : "state-success");
         })
         .catch(function () {
-          submitBtn.disabled = false;
+          submitBtn.disabled = inkLength < MIN_INK;
           submitBtn.textContent = "Confirm job complete";
           var el = document.getElementById("submit-error");
           el.textContent = "Couldn't save that just now. Check your connection and try again.";

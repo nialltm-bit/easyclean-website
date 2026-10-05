@@ -691,6 +691,7 @@ layout: null
   @media (prefers-reduced-motion: reduce) { .bf-day-skel { animation: none; } }
   .bf-slots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
   .bf-slots-loading, .bf-slots-empty { font-size: 13.5px; color: var(--slate); }
+  .bf-retry { padding: 0; border: none; background: none; font: inherit; font-weight: 600; color: var(--teal-deep); text-decoration: underline; cursor: pointer; }
   .bf-slot-day { font-family: "Public Sans", sans-serif; font-weight: 600; font-size: 12.5px; color: var(--slate); margin: 12px 0 8px; }
   .bf-slot-btn {
     padding: 12px 16px;
@@ -901,10 +902,10 @@ layout: null
             <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-rooms"><span class="igt-label">Rooms</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
             <div class="item-group-body" id="group-rooms">
 {%- for p in site.data.prices %}{% if p.group == "rooms" and p.agents %}
-            <div class="item-row" data-item="{{ p.item }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" }}">
-              <div class="info"><span class="name">{{ p.shown_as | default: p.item }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta }}</span>{% endif %}</div>
+            <div class="item-row" data-item="{{ p.item | escape }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" | escape }}">
+              <div class="info"><span class="name">{{ p.shown_as | default: p.item | escape }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta | escape }}</span>{% endif %}</div>
               <span class="price mono">£{{ p.price }}</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
+              <div class="stepper"><button data-action="dec" aria-label="Remove one {{ p.item | escape }}">−</button><span class="qty mono">0</span><button data-action="inc" aria-label="Add one {{ p.item | escape }}">+</button></div>
             </div>{% endif %}{% endfor %}
             </div>
           </div>
@@ -913,10 +914,10 @@ layout: null
             <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-sofas"><span class="igt-label">Sofas &amp; seating</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
             <div class="item-group-body" id="group-sofas">
 {%- for p in site.data.prices %}{% if p.group == "sofas" and p.agents %}
-            <div class="item-row" data-item="{{ p.item }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" }}">
-              <div class="info"><span class="name">{{ p.shown_as | default: p.item }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta }}</span>{% endif %}</div>
+            <div class="item-row" data-item="{{ p.item | escape }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" | escape }}">
+              <div class="info"><span class="name">{{ p.shown_as | default: p.item | escape }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta | escape }}</span>{% endif %}</div>
               <span class="price mono">£{{ p.price }}</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
+              <div class="stepper"><button data-action="dec" aria-label="Remove one {{ p.item | escape }}">−</button><span class="qty mono">0</span><button data-action="inc" aria-label="Add one {{ p.item | escape }}">+</button></div>
             </div>{% endif %}{% endfor %}
             </div>
           </div>
@@ -925,10 +926,10 @@ layout: null
             <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-mattresses"><span class="igt-label">Mattresses</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
             <div class="item-group-body" id="group-mattresses">
 {%- for p in site.data.prices %}{% if p.group == "mattresses" and p.agents %}
-            <div class="item-row" data-item="{{ p.item }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" }}">
-              <div class="info"><span class="name">{{ p.shown_as | default: p.item }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta }}</span>{% endif %}</div>
+            <div class="item-row" data-item="{{ p.item | escape }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" | escape }}">
+              <div class="info"><span class="name">{{ p.shown_as | default: p.item | escape }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta | escape }}</span>{% endif %}</div>
               <span class="price mono">£{{ p.price }}</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
+              <div class="stepper"><button data-action="dec" aria-label="Remove one {{ p.item | escape }}">−</button><span class="qty mono">0</span><button data-action="inc" aria-label="Add one {{ p.item | escape }}">+</button></div>
             </div>{% endif %}{% endfor %}
             </div>
           </div>
@@ -937,10 +938,10 @@ layout: null
             <h4 class="item-group-toggle" role="button" tabindex="0" aria-expanded="true" aria-controls="group-rugs"><span class="igt-label">Rugs</span><span class="igt-count" aria-hidden="true"></span><span class="igt-toggle-text" aria-hidden="true">Hide</span><span class="igt-chev" aria-hidden="true">&#9662;</span></h4>
             <div class="item-group-body" id="group-rugs">
 {%- for p in site.data.prices %}{% if p.group == "rugs" and p.agents %}
-            <div class="item-row" data-item="{{ p.item }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" }}">
-              <div class="info"><span class="name">{{ p.shown_as | default: p.item }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta }}</span>{% endif %}</div>
+            <div class="item-row" data-item="{{ p.item | escape }}" data-price="{{ p.price }}" data-mins="{{ p.mins }}" data-meta="{{ p.meta | replace: "×", "x" | escape }}">
+              <div class="info"><span class="name">{{ p.shown_as | default: p.item | escape }}</span>{% if p.meta != "" %}<span class="meta">{{ p.meta | escape }}</span>{% endif %}</div>
               <span class="price mono">£{{ p.price }}</span>
-              <div class="stepper"><button data-action="dec">−</button><span class="qty mono">0</span><button data-action="inc">+</button></div>
+              <div class="stepper"><button data-action="dec" aria-label="Remove one {{ p.item | escape }}">−</button><span class="qty mono">0</span><button data-action="inc" aria-label="Add one {{ p.item | escape }}">+</button></div>
             </div>{% endif %}{% endfor %}
             <div class="rug-note">Wool, silk, antique or heavily fringed rugs carry a real risk of shrinkage or colour bleed, please use Quick Quote instead so we can assess from photos first.</div>
             </div>
@@ -972,67 +973,6 @@ layout: null
     <div class="wrap">
       <h2 style="text-transform:none; font-size:clamp(28px,3.6vw,40px); font-weight:700;">Instant Book</h2>
 
-      <!--
-        SETUP NEEDED — Google Apps Script booking backend.
-
-        This section used to embed Google Calendar's free "Appointment
-        Schedule" widget. That's gone now: it's a closed system with no
-        API, so the item list picked above could never reach it without
-        the customer manually carrying something across (a description,
-        then a reference code, both tried and both correctly rejected as
-        friction — see git history / the build guide doc for that back
-        and forth). This replaces it with a custom booking step, backed
-        by a small script that lives in your own Google account, so
-        items, price, name, phone, address and time all travel together
-        in one request. No separate system, nothing to paste.
-
-        HOW IT WORKS
-        The form below calls a Google Apps Script "Web App" you deploy
-        once (see APPS_SCRIPT_URL in the JS further down). It has two
-        jobs: tell the site which time slots are actually free (it reads
-        your real calendar), and, when someone hits "Confirm booking",
-        create the calendar event itself with the full item list, price,
-        address, phone and payment method written into the event's
-        description. You open your calendar and everything is already
-        there. No sheet to check, no reference number to match up.
-
-        SETUP NEEDED (one-time, ~30-45 minutes, I'll walk you through it):
-        1. Go to script.google.com → New project.
-        2. Delete the default empty code and paste in the contents of
-           the Code.gs file provided alongside this site (ask me for it
-           again any time — it's also saved in the project).
-        3. Check the WEEKLY_SLOTS constant near the top of that file
-           matches your real availability (it's pre-filled to roughly
-           match the "Mon-Fri early & evening, Saturday full day, Sunday
-           by arrangement" hours already shown further down this page —
-           edit the times if that's not quite right).
-        4. Project Settings (gear icon, left sidebar) → General settings
-           → Time zone → set to "(GMT+00:00) London".
-        5. Deploy → New deployment → type: Web app → Execute as: Me →
-           Who has access: Anyone → Deploy. Click "Authorize access" and
-           allow it when Google asks (it's asking to let YOUR script see
-           YOUR calendar and send email from YOUR address — normal for
-           this kind of setup).
-        6. Copy the Web app URL it gives you (ends in /exec) and send it
-           back — it goes into APPS_SCRIPT_URL in the JS below and
-           that's the entire remaining wiring step.
-
-        Until that URL is filled in, this section shows a friendly
-        fallback (WhatsApp Quick Quote) instead of trying to book, so
-        nothing breaks in the meantime.
-
-        KNOWN LIMITATIONS (see the "custom booking flow" ticket in
-        Linear for what's deliberately deferred, not forgotten):
-        - No self-serve cancel/reschedule link for the customer yet —
-          handle those by text/WhatsApp for now, same as anything else
-          unusual.
-        - The Apps Script submission has no retry if your internet or
-          Google's have a blip mid-request — rare, but if it happens the
-          form shows an error and offers the WhatsApp fallback rather
-          than failing silently.
-        - Still fixed-duration slots (SLOT_MINS below), same as before —
-          true variable duration is the separate FRE-5 ticket.
-      -->
 
       <div class="booking-live" id="booking-live">
         <div class="booking-summary" id="booking-summary" style="display:none;">
@@ -1145,8 +1085,8 @@ layout: null
       </div>
       <div>
         <h5>Contact</h5>
-        <p>WhatsApp: <span class="mono">07873 212249</span></p>
-        <p>easycleansomerset@gmail.com</p>
+        <p>WhatsApp: <a class="mono" href="https://wa.me/447873212249" target="_blank" rel="noopener">07873 212249</a></p>
+        <p><a href="mailto:easycleansomerset@gmail.com">easycleansomerset@gmail.com</a></p>
         <p><a href="index.html">Booking for your own home instead?</a></p>
       </div>
     </div>
@@ -1165,8 +1105,7 @@ layout: null
 (function () {
   "use strict";
 
-  // Business WhatsApp number (personal number, for now — revisit a
-  // dedicated eSIM business number once volume justifies it).
+  // Business WhatsApp number.
   var WHATSAPP_NUMBER = "447873212249";
 
   function waLink(message) {
@@ -1178,16 +1117,13 @@ layout: null
   document.getElementById("wa-quick-quote").href = waLink(defaultMsg + "(I'll add photos here)");
   document.getElementById("foot-wa").href = waLink(defaultMsg);
 
-  // ---- Slot sizing ----
-  // V1 runs on a single Google Calendar Appointment Schedule (free personal
-  // accounts are capped at one — multiple schedules need a paid Workspace
-  // tier, see the HTML comment above the booking embed). SLOT_MINS should
-  // match whatever duration that one schedule is actually set to in Google
-  // Calendar. Fixed 45-minute overhead is added per job (travel, set-up,
-  // colourfastness check, pack-down — Section 5.1 of the business plan)
-  // whenever at least one item is picked.
+  // ---- Job time estimate ----
+  // A fixed 45-minute overhead (travel, set-up, colourfastness check,
+  // pack-down) is added to every job with at least one item picked.
+  // SLOT_MINS is the standard calendar slot. Nothing on this page checks a
+  // basket against it at the moment: the online size limit is switched off.
   var FIXED_OVERHEAD_MINS = 45;
-  var SLOT_MINS = 150; // 2.5 hours — update if the schedule's duration changes
+  var SLOT_MINS = 150; // 2.5 hours
 
   function formatMins(mins) {
     var h = Math.floor(mins / 60);
@@ -1235,7 +1171,7 @@ layout: null
       summaryEl.innerHTML = '<div class="summary-empty">Nothing added yet, use the + buttons on the left.</div>';
     } else {
       summaryEl.innerHTML = lines.map(function (l) {
-        return '<div class="summary-line"><span>' + l.split(": ")[0] + "</span><span>" + l.split(": ")[1] + "</span></div>";
+        return '<div class="summary-line"><span>' + escapeHtml(l.split(": ")[0]) + "</span><span>" + escapeHtml(l.split(": ")[1]) + "</span></div>";
       }).join("");
     }
 
@@ -1250,12 +1186,18 @@ layout: null
     }
 
     var bookBtn = document.getElementById("btn-continue-book");
+    // It's a link, so "disabled" alone doesn't stop it: also take it out of
+    // the tab order and tell screen readers it's unavailable.
     if (total === 0) {
       bookBtn.setAttribute("disabled", "disabled");
+      bookBtn.setAttribute("aria-disabled", "true");
+      bookBtn.setAttribute("tabindex", "-1");
       bookBtn.style.pointerEvents = "none";
       bookBtn.style.opacity = "0.45";
     } else {
       bookBtn.removeAttribute("disabled");
+      bookBtn.removeAttribute("aria-disabled");
+      bookBtn.removeAttribute("tabindex");
       bookBtn.style.pointerEvents = "auto";
       bookBtn.style.opacity = "1";
     }
@@ -1350,14 +1292,10 @@ layout: null
     });
   });
 
-  // ---- Custom booking flow (Google Apps Script backend) ----
-  // See the big HTML comment above the booking section for the full
-  // explanation and setup steps. Short version: replaces the old Google
-  // Calendar embed entirely with a booking step built into this page,
-  // backed by a small script in your own Google account. Fill in the
-  // deployed Web App URL below (ends in /exec) once it's set up; until
-  // then this section shows a WhatsApp fallback instead of trying to
-  // book, so nothing breaks.
+  // ---- Booking flow (Google Apps Script backend) ----
+  // APPS_SCRIPT_URL is the booking system's web app (ends in /exec). It
+  // lists the free times and creates the booking in the calendar. If it's
+  // ever blank, this section shows a WhatsApp fallback instead.
   var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzib7aiWlTG1JN1vawUToNL2r9OYoFp-fJYNsbvJdhHAHtLaddPr0wMKYnxYLwoQxt_GA/exec";
   var APPS_SCRIPT_CONFIGURED = !!APPS_SCRIPT_URL && APPS_SCRIPT_URL.indexOf("http") === 0;
 
@@ -1446,7 +1384,9 @@ layout: null
         renderDayPicker();
       })
       .catch(function () {
-        daysEl.innerHTML = '<div class="bf-slots-empty">Couldn’t load available times just now. Try again in a moment, or use WhatsApp Quick Quote instead.</div>';
+        document.getElementById("bf-days-nav").style.display = "none";
+        daysEl.innerHTML = '<div class="bf-slots-empty">Couldn’t load available times just now. <button type="button" class="bf-retry" id="bf-slots-retry">Try again</button> or use WhatsApp Quick Quote instead.</div>';
+        document.getElementById("bf-slots-retry").addEventListener("click", fetchSlots);
       });
   }
 
@@ -1515,7 +1455,7 @@ layout: null
     pageDays.forEach(function (day) {
       var parts = splitDayLabel(day);
       var sel = day === selectedDay ? " selected" : "";
-      html += '<button type="button" class="bf-day-card' + sel + '" data-day="' + escapeHtml(day) + '">' +
+      html += '<button type="button" class="bf-day-card' + sel + '" aria-pressed="' + (day === selectedDay) + '" data-day="' + escapeHtml(day) + '">' +
         '<div class="dow">' + escapeHtml(parts[0]) + '</div>' +
         '<div class="dom">' + escapeHtml(parts[1]) + '</div>' +
         '<div class="mon">' + escapeHtml(parts[2]) + '</div>' +
@@ -1524,7 +1464,14 @@ layout: null
     daysEl.innerHTML = html;
     daysEl.querySelectorAll(".bf-day-card").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        selectedDay = btn.getAttribute("data-day");
+        var day = btn.getAttribute("data-day");
+        if (day !== selectedDay) {
+          // A time picked on the previous day would stay selected but out of
+          // sight, and Confirm would still book it. Start the new day fresh.
+          selectedSlot = null;
+          updateSubmitEnabled();
+        }
+        selectedDay = day;
         renderDayPicker();
       });
     });
@@ -1549,7 +1496,7 @@ layout: null
     var html = "";
     daySlots.forEach(function (slot) {
       var sel = slot.start === selectedSlot ? " selected" : "";
-      html += '<button type="button" class="bf-slot-btn' + sel + '" data-start="' + escapeHtml(slot.start) + '">' + escapeHtml(slot.timeLabel) + "</button>";
+      html += '<button type="button" class="bf-slot-btn' + sel + '" aria-pressed="' + (slot.start === selectedSlot) + '" data-start="' + escapeHtml(slot.start) + '">' + escapeHtml(slot.timeLabel) + "</button>";
     });
     slotsEl.innerHTML = html;
     slotsEl.querySelectorAll(".bf-slot-btn").forEach(function (btn) {
@@ -1636,6 +1583,10 @@ layout: null
   document.querySelectorAll('input[name="bf-access"]').forEach(function (r) {
     r.addEventListener("change", applyAccessChoice);
   });
+  // Browsers can restore the ticked option on reload or Back, so match the
+  // fields to whatever is ticked now rather than assuming the default.
+  applyAccessChoice();
+  window.addEventListener("pageshow", applyAccessChoice);
 
   document.getElementById("bf-days-prev").addEventListener("click", function () {
     dayPage--;
@@ -1748,7 +1699,7 @@ layout: null
             }
             statusEl.className = "bf-status err";
             statusEl.style.display = "block";
-            submitBtn.removeAttribute("disabled");
+            updateSubmitEnabled();
             return;
           }
           if (data.error === "slot_taken") {
@@ -1758,7 +1709,7 @@ layout: null
             selectedSlot = null;
             slotsLoaded = false;
             updateBookingSection();
-            submitBtn.removeAttribute("disabled");
+            updateSubmitEnabled(); // stays off until a new time is picked
             return;
           }
           throw new Error(data.error || "unknown");
@@ -1773,7 +1724,7 @@ layout: null
         statusEl.innerHTML = 'Something went wrong on our end. <a href="' + waLink(waMsg) + '" target="_blank" rel="noopener">Send us your details on WhatsApp</a> and we’ll confirm manually.';
         statusEl.className = "bf-status err";
         statusEl.style.display = "block";
-        submitBtn.removeAttribute("disabled");
+        updateSubmitEnabled();
       });
   });
 
