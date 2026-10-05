@@ -447,7 +447,7 @@ window.ecBooking = function (config) {
         '<a class="btn btn-wa" target="_blank" rel="noopener" href="' + waLink(messages.outOfArea(r.formatted, currentSelection.lines.join(", "), formatGBP(currentSelection.total))) + '">Message us on WhatsApp</a>';
       el.style.display = "block";
     } else if (r.status === "invalid" && areaTouched) {
-      el.innerHTML = '<p>Please enter the full postcode, for example BA3 2EE.</p>';
+      el.innerHTML = '<p>Please enter the full postcode, for example BA1 1AA.</p>';
       el.style.display = "block";
     } else {
       el.style.display = "none";
