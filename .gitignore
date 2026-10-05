@@ -1,0 +1,6 @@
+# Local Jekyll build output
+_site/
+.jekyll-cache/
+
+# Test tooling (see _tests/booking.test.js)
+_tests/node_modules/
