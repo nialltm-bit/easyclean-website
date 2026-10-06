@@ -366,6 +366,40 @@ window.ecBooking = function (config) {
     return first[1] + " " + first[2] + " – " + last[1] + " " + last[2];
   }
 
+  // The day picker also shows days with no times. It works out the window the
+  // same way the booking system does, so these two must match Code.gs: the
+  // first day is the one 24 hours from now (LEAD_TIME_HOURS) and the window
+  // is 21 days from today (DAYS_AHEAD). If Code.gs ever offers a time outside
+  // that, the list stretches to include it, so a free time is never hidden.
+  var LEAD_TIME_HOURS = 24;
+  var DAYS_AHEAD = 21;
+  var DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  var MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // [{ label: "Fri 2 Oct", hasTimes: false }, ...] one per calendar day (UK).
+  // A day with times keeps the label the booking system gave it.
+  function buildDayList() {
+    var backendLabel = {};
+    var first = ukDayNumber(new Date(new Date().getTime() + LEAD_TIME_HOURS * 3600000));
+    var last = ukDayNumber(new Date()) + DAYS_AHEAD - 1;
+    slotsCache.forEach(function (slot) {
+      var n = ukDayNumber(new Date(slot.start));
+      if (!(n in backendLabel)) backendLabel[n] = slot.dayLabel;
+      first = Math.min(first, n);
+      last = Math.max(last, n);
+    });
+    var list = [];
+    for (var n = first; n <= last; n++) {
+      var hasTimes = n in backendLabel;
+      var d = new Date(n * 86400000); // midnight UTC of that UK date
+      list.push({
+        label: hasTimes ? backendLabel[n] : DAY_NAMES[d.getUTCDay()] + " " + d.getUTCDate() + " " + MONTH_NAMES[d.getUTCMonth()],
+        hasTimes: hasTimes
+      });
+    }
+    return list;
+  }
+
   function renderDayPicker() {
     var daysEl = document.getElementById("bf-days");
     var navEl = document.getElementById("bf-days-nav");
@@ -377,17 +411,19 @@ window.ecBooking = function (config) {
       return;
     }
 
-    // Unique day labels, in the order they appear in slotsCache (already
-    // chronological from the backend).
-    var days = [];
-    slotsCache.forEach(function (slot) {
-      if (days.indexOf(slot.dayLabel) === -1) days.push(slot.dayLabel);
-    });
+    // Every calendar day in the window, in order, including days with no
+    // times (Sundays, days that are fully booked): the booking system only
+    // sends back free times, so without these the picker would jump from
+    // Friday to Monday. A day with no times can still be clicked, and says so.
+    var allDays = buildDayList();
+    var days = allDays.map(function (d) { return d.label; });
+    var daysWithTimes = {};
+    allDays.forEach(function (d) { if (d.hasTimes) daysWithTimes[d.label] = true; });
 
-    // Default to the first day, or keep the current selection if it's
-    // still one of the available days (e.g. after a re-fetch).
+    // Default to the first day that has times, or keep the current selection
+    // if it's still in the list (e.g. after a re-fetch).
     if (!selectedDay || days.indexOf(selectedDay) === -1) {
-      selectedDay = days[0];
+      selectedDay = slotsCache[0].dayLabel;
     }
 
     // Show DAY_PAGE_SIZE days at a time rather than the full range in one
@@ -414,7 +450,9 @@ window.ecBooking = function (config) {
     pageDays.forEach(function (day) {
       var parts = splitDayLabel(day);
       var sel = day === selectedDay ? " selected" : "";
-      html += '<button type="button" class="bf-day-card' + sel + '" aria-pressed="' + (day === selectedDay) + '" data-day="' + escapeHtml(day) + '">' +
+      var empty = !daysWithTimes[day];
+      html += '<button type="button" class="bf-day-card' + sel + (empty ? " no-times" : "") + '" aria-pressed="' + (day === selectedDay) + '" data-day="' + escapeHtml(day) + '"' +
+        (empty ? ' aria-label="' + escapeHtml(day) + ', no times available"' : "") + '>' +
         '<div class="dow">' + escapeHtml(parts[0]) + '</div>' +
         '<div class="dom">' + escapeHtml(parts[1]) + '</div>' +
         '<div class="mon">' + escapeHtml(parts[2]) + '</div>' +
@@ -433,6 +471,8 @@ window.ecBooking = function (config) {
         selectedDay = day;
         renderDayPicker();
         refocus(daysEl, ".bf-day-card", "data-day", day);
+        // Focus stays on the day, so say what that day holds when it holds nothing.
+        if (!daysWithTimes[day]) announce("No times on " + day + ". Pick another day.");
       });
     });
 
@@ -456,12 +496,12 @@ window.ecBooking = function (config) {
     var labelEl = document.getElementById("bf-slots-label");
     var daySlots = slotsCache.filter(function (slot) { return slot.dayLabel === selectedDay; });
 
-    labelEl.textContent = selectedDay
-      ? daySlots.length + (daySlots.length === 1 ? " time" : " times") + " on " + selectedDay
-      : "";
+    labelEl.textContent = !selectedDay ? ""
+      : daySlots.length === 0 ? "No times on " + selectedDay
+      : daySlots.length + (daySlots.length === 1 ? " time" : " times") + " on " + selectedDay;
 
     if (!daySlots.length) {
-      slotsEl.innerHTML = '<div class="bf-slots-empty">No online slots that day. Try another day, or WhatsApp us and we’ll find you a time.</div>';
+      slotsEl.innerHTML = '<div class="bf-slots-empty">Pick another day, or WhatsApp us and we’ll find you a time.</div>';
       return;
     }
 
