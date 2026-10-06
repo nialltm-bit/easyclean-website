@@ -732,6 +732,23 @@ function websiteBookingNotes_(data) {
   return [parking ? "Parking: " + parking + "." : "", str(data.notes)].filter(String).join(" ");
 }
 
+// ---- Asking for the extras by reply (FRE-209) ----
+// The booking forms tuck parking, pets and notes under a closed "Anything
+// else?" link, so many customers leave them empty. The confirmation and
+// day-before emails ask for them by reply, but only when the Notes are empty.
+// Notes already holds the parking answer too (see websiteBookingNotes_).
+var EXTRAS_ASK_TEXT = "Reply to this email with anything we should know: parking, pets, gate codes, stains you'd like us to look at.";
+
+function needsExtrasAsk_(notes) {
+  return !String(notes || "").trim();
+}
+
+function extrasAskHtml_() {
+  var SANS = "Arial,Helvetica,sans-serif", INK = "#12232B", PAPER = "#F5F7F6", TEAL = "#0E7C86";
+  return '<p style="margin:0;padding:12px 14px;border-left:3px solid ' + TEAL + ';background:' + PAPER + ';font-family:' + SANS + ';font-size:14px;line-height:1.55;color:' + INK + ';">' +
+    escHtml(EXTRAS_ASK_TEXT).replace("&#39;", "&#8217;") + '</p>';
+}
+
 // ---- Consumer Contracts Regulations 2013: the 14-day right to cancel ----
 // A homeowner who books online, by phone or by message can cancel within 14
 // days, counting from the day after booking. To clean inside that time the
@@ -957,6 +974,7 @@ function sendBookingConfirmation_(data, reference, slotLabel) {
   // Website bookings work this out with the job's time. Admin-app bookings
   // still get the information and form, but never the early-start line.
   var cancel = data.cancellation || cancellationInfo_(data, null, new Date());
+  var askExtras = needsExtrasAsk_(data.notes);
   var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" +
     encodeURIComponent("Hi EasyClean Somerset, I need to change my booking. Ref: " + reference);
   // Plain-text fallback — shown by the small number of mail clients that
@@ -970,6 +988,7 @@ function sendBookingConfirmation_(data, reference, slotLabel) {
     "Where: " + data.address + "\n" +
     (data.channel === "Agent/Landlord" ? "Access: " + accessEmailText(data) + "\n" : "") + "\n" +
     "Reference: " + reference + ". Keep this handy if you need to get in touch.\n\n" +
+    (askExtras ? EXTRAS_ASK_TEXT + "\n\n" : "") +
     "Need to change anything? Just reply to this email or WhatsApp us: " + waLink + "\n\n" +
     (cancel ? cancellationText_(cancel, reference) + "\n\n" : "") +
     "Thanks,\nEasyClean Somerset";
@@ -984,6 +1003,7 @@ function sendBookingConfirmation_(data, reference, slotLabel) {
     reference: reference,
     waLink: waLink,
     access: data.channel === "Agent/Landlord" ? accessEmailText(data) : "",
+    askExtras: askExtras,
     cancel: cancel
   });
 
@@ -1103,6 +1123,9 @@ function buildConfirmationEmailHtml(d) {
             detailRow("Where", esc(d.address), !d.access) +
             (d.access ? detailRow("Access", esc(d.access), true) : "") +
           '</table>' +
+
+          // Asks for parking, pets and gate codes when the booking has no notes
+          (d.askExtras ? '<div style="margin-top:20px;">' + extrasAskHtml_() + '</div>' : '') +
 
           // Prep checklist — added after a customer asked what they should
           // do before the visit to make sure everything's accessible. The
@@ -1255,12 +1278,13 @@ function sendDayBeforeEmail(v, start) {
     "Just a reminder, we're booked in for tomorrow.\n\n" +
     "When: " + when + "\nWhat: " + v.Items + "\nWhere: " + v.Address + "\nReference: " + v.Reference + "\n\n" +
     (accessNudge ? "Access: you chose to arrange access with us. If you haven't told us yet how we'll get in (keys, a lockbox code or the tenant's details), please reply or WhatsApp us today.\n\n" : "") +
+    (needsExtrasAsk_(v.Notes) ? EXTRAS_ASK_TEXT + "\n\n" : "") +
     "Getting ready: clear small items off the floor, keep pets in another room, and clear a path from the door. A plug socket and water tap nearby helps." +
     (String(v.Items).indexOf("Mattress") !== -1 ? " Please strip the bedding beforehand." : "") +
     "\n\nNeed to change anything? Reply to this email or WhatsApp us: " + waLink + "\n\nSee you tomorrow,\nEasyClean Somerset";
   sendCustomerEmail_(v.Email, "Reminder: we're cleaning for you tomorrow", textBody, {
     htmlBody: buildReminderEmailHtml({
-      dayBefore: true, accessNudge: accessNudge,
+      dayBefore: true, accessNudge: accessNudge, askExtras: needsExtrasAsk_(v.Notes),
       name: name, slotLabel: when, items: v.Items, total: v.Total, payment: v["Payment method"],
       address: v.Address, reference: v.Reference, waLink: waLink,
       access: isAgent ? v.Access : ""
@@ -1371,6 +1395,8 @@ function buildReminderEmailHtml(d) {
             detailRow("Where", esc(d.address), !d.access) +
             (d.access ? detailRow("Access", esc(d.access), true) : "") +
           '</table>' +
+          // Asks for parking, pets and gate codes when the booking has no notes
+          (d.dayBefore && d.askExtras ? '<div style="margin-top:20px;">' + extrasAskHtml_() + '</div>' : '') +
           (d.dayBefore ? prepChecklistHtml(d.items) : '') +
         '</td></tr>' +
         '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:20px 28px 32px;text-align:center;">' +

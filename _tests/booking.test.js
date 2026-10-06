@@ -102,24 +102,46 @@ async function bookingPage(browser, base, file) {
   await page.waitForSelector(".bf-day-card");
   check("Try again loads the available days", (await page.$$(".bf-day-card")).length === 2);
 
+  // The form runs postcode, time, contact details, payment, then the closed extras.
+  const order = await page.evaluate((agents) => {
+    const ids = ["bf-postcode", "bf-days", "bf-name", "bf-phone", "bf-email", "bf-address"].concat(agents ? ["bf-access-note"] : []).concat(["bf-extras", "bf-submit"]);
+    const els = ids.map((id) => document.getElementById(id));
+    return els.every((el, i) => i === 0 || !!(els[i - 1].compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
+  }, agents);
+  check("form order: postcode, time, contact details, then the extras", order);
+  check("address box is for the street only (the postcode is asked first)", /street/i.test(await page.textContent('label[for="bf-address"]')));
+  if (!agents) check("payment starts on Cash", await page.isChecked('input[name="bf-payment"][value="Cash"]'));
+
+  // The postcode comes first, and the area check answers before anything else is typed.
+  await page.fill("#bf-postcode", "SW1A 1AA");
+  check("postcode outside the area offers WhatsApp straight away", (await page.textContent("#bf-area-msg")).includes("SW1A") && (await page.$$("#bf-area-msg a.btn-wa")).length === 1);
+  await page.fill("#bf-postcode", "BA1 1");
+  check("a part-typed postcode shows no area note", !(await page.isVisible("#bf-area-msg")));
+  await page.fill("#bf-postcode", "BA1 1AA");
+  check("a postcode we cover shows no area note", !(await page.isVisible("#bf-area-msg")));
+  await page.fill("#bf-postcode", "SW1A 1AA");
+
   // Confirm only switches on when everything needed is there.
   await page.click(".bf-slot-btn >> nth=0");
   await page.fill("#bf-name", "Test Person");
-  if (agents) await page.fill("#bf-business", "Acme Lettings");
   await page.fill("#bf-phone", "07000 000000");
   await page.fill("#bf-email", "test@example.com");
   await page.fill("#bf-address", "1 High Street");
-  check("Confirm stays off without a postcode", await confirmOff());
-  await page.fill("#bf-postcode", "SW1A 1AA");
-  check("postcode outside the area offers WhatsApp", (await page.textContent("#bf-area-msg")).includes("SW1A") && (await page.$$("#bf-area-msg a.btn-wa")).length === 1);
   check("Confirm stays off outside the area", await confirmOff());
   await page.fill("#bf-postcode", "ba11aa");
   await page.focus("#bf-name");
   check("postcode is tidied when leaving the box", (await page.inputValue("#bf-postcode")) === "BA1 1AA");
   if (agents) {
-    check("agent page: Confirm stays off until the site contact is filled in", await confirmOff());
+    check("agent page: 'We'll arrange access' is the default", await page.isChecked('input[name="bf-access"][value="arrange"]'));
+    check("agent page: the site contact boxes start hidden and not required", await page.$eval("#bf-site-contact", (el) => getComputedStyle(el).display === "none") && (await page.$eval("#bf-site-contact-name", (e) => !e.required)));
+    await page.check('input[name="bf-access"][value="onsite"]');
+    check("agent page: 'Someone will be there' shows the site contact boxes", await page.isVisible("#bf-site-contact-name") && await page.isVisible("#bf-site-contact-phone"));
+    check("agent page: Confirm waits for the site contact when someone will be there", await confirmOff());
+    await page.fill("#bf-site-contact-name", "Site Person");
+    await page.fill("#bf-site-contact-phone", "07111 111111");
+    check("agent page: Confirm switches on once the site contact is filled in", !(await confirmOff()));
     await page.check('input[name="bf-access"][value="arrange"]');
-    check("agent page: arranging access hides the site contact boxes", await page.$eval("#bf-site-contact", (el) => el.style.display === "none"));
+    check("agent page: arranging access hides the site contact boxes again", await page.$eval("#bf-site-contact", (el) => getComputedStyle(el).display === "none"));
   }
   check("terms link by Confirm", (await page.$$('.bf-terms a[href="terms.html"]')).length === 1);
   if (!agents) {
@@ -131,10 +153,22 @@ async function bookingPage(browser, base, file) {
   }
   check("Confirm switches on once everything is filled in", !(await confirmOff()));
   if (agents) {
+    await page.fill("#bf-business", "Acme Lettings");
     await page.fill("#bf-business", "");
     check("agent page: business name is optional (private landlords)", !(await confirmOff()));
     await page.fill("#bf-business", "Acme Lettings");
   }
+
+  // The extras start closed and out of sight. The summary is a real keyboard control.
+  check("the extras start closed", (await page.$eval("#bf-extras", (d) => !d.open)) && !(await page.isVisible("#bf-notes")) && !(await page.isVisible('input[name="bf-parking"]')));
+  check("the extras link says what is inside", (await page.textContent("#bf-extras summary")).startsWith("Anything else? (parking, pets,"));
+  check("the extras hold parking, notes and the " + (agents ? "reference" : "referral code"),
+    await page.$$eval("#bf-extras", (d, id) => ["bf-notes", id].every((x) => d[0].querySelector("#" + x)) && d[0].querySelectorAll('input[name="bf-parking"]').length === 3, agents ? "bf-agency-id" : "bf-referral"));
+  await page.focus("#bf-extras summary");
+  await page.keyboard.press("Enter");
+  check("the extras open from the keyboard", (await page.$eval("#bf-extras", (d) => d.open)) && (await page.isVisible("#bf-notes")));
+  await page.keyboard.press("Enter");
+  check("and close again", await page.$eval("#bf-extras", (d) => !d.open));
 
   // Changing day drops a time picked on another day.
   await page.click('.bf-day-card[data-day="Tue 6 Oct"]');
@@ -157,6 +191,7 @@ async function bookingPage(browser, base, file) {
 
   // A booking that goes through.
   fake.replies.push({ ok: true, reference: "EC-TEST1" });
+  await page.click("#bf-extras summary");
   if (!agents) {
     await page.check('input[name="bf-payment"][value="Bank transfer"]');
     await page.fill("#bf-referral", "FRIEND10");
@@ -239,18 +274,25 @@ async function accessibility(browser, base, file) {
 
   const legends = await page.$$eval("fieldset > legend", (els) => els.map((e) => e.textContent.trim()));
   const parking = "Is there parking, or a visitor permit? (optional)";
-  const expected = agents ? ["Access on the day", parking, "Choose a time"] : [parking, "How would you like to pay?", "Choose a time"];
+  const expected = agents ? ["Choose a time", "Access on the day", parking] : ["Choose a time", "How would you like to pay?", parking];
   check("choice groups have a fieldset and legend", JSON.stringify(legends) === JSON.stringify(expected), legends);
 
+  // The extras link is a details/summary, so its open or closed state is read out natively.
+  const summaryRole = await page.$eval("#bf-extras summary", (el) => ({ tag: el.tagName, parent: el.parentElement.tagName, tabindex: el.tabIndex }));
+  check("the extras link is a real summary in a details box, reachable by Tab", summaryRole.tag === "SUMMARY" && summaryRole.parent === "DETAILS" && summaryRole.tabindex >= 0, summaryRole);
+  await page.focus("#bf-extras summary");
+  await page.keyboard.press("Space");
+  check("the extras open with Space", await page.$eval("#bf-extras", (d) => d.open));
+  await page.keyboard.press("Space");
+
+  await page.fill("#bf-postcode", "SW1A 1AA");
+  check("out-of-area note is read out", await waitToHear("We don’t take online bookings"), await spoken());
+  await page.fill("#bf-postcode", "BA1 1AA");
   await page.fill("#bf-name", "Test Person");
   if (agents) await page.fill("#bf-business", "Acme Lettings");
   await page.fill("#bf-phone", "07000 000000");
   await page.fill("#bf-email", "test@example.com");
   await page.fill("#bf-address", "1 High Street");
-  if (agents) await page.check('input[name="bf-access"][value="arrange"]');
-  await page.fill("#bf-postcode", "SW1A 1AA");
-  check("out-of-area note is read out", await waitToHear("We don’t take online bookings"), await spoken());
-  await page.fill("#bf-postcode", "BA1 1AA");
   if (!agents) await page.check("#bf-early-start");
 
   fake.replies.push({ ok: false, error: "something_else" });
@@ -280,19 +322,47 @@ async function laterClean(browser, base) {
   await page.click('#group-rooms .item-row:nth-child(1) button[data-action="inc"]');
   await page.click("#bf-slots-retry");
   await page.waitForSelector(".bf-day-card");
+  await page.fill("#bf-postcode", "BA1 1AA");
   await page.click(".bf-slot-btn >> nth=0");
   await page.fill("#bf-name", "Test Person");
   await page.fill("#bf-phone", "07000 000000");
   await page.fill("#bf-email", "test@example.com");
   await page.fill("#bf-address", "1 High Street");
-  await page.fill("#bf-postcode", "BA1 1AA");
   check("no early-start box for a clean after 14 days", !(await page.isVisible("#bf-early-start")));
-  check("Confirm switches on without it", !(await page.$eval("#bf-submit", (b) => b.disabled)));
+  check("Confirm switches on without opening the extras", !(await page.$eval("#bf-submit", (b) => b.disabled)));
   fake.replies.push({ ok: true, reference: "EC-TEST3" });
   await page.click("#bf-submit");
   await page.waitForSelector("#booking-confirmed .ref");
-  check("booking says no early start was asked for", fake.bookings[fake.bookings.length - 1].earlyStart === false);
+  const sent = fake.bookings[fake.bookings.length - 1];
+  check("booking says no early start was asked for", sent.earlyStart === false);
+  check("with the extras left closed, the booking sends the same fields, empty", sent.parking === "" && sent.notes === "" && sent.referralCode === "" && sent.payment === "Cash" && sent.address === "1 High Street, BA1 1AA", sent);
   await context.close();
+}
+
+// A browser that restores typed values (Back, reload) must not hide them in the closed extras.
+async function restoredExtras(browser, base, file) {
+  const agents = file === "agents.html";
+  console.log("\n== " + file + " (values restored by the browser)");
+  const { page, context } = await openPage(browser, base + file);
+  await page.click('#group-rooms .item-row:nth-child(1) button[data-action="inc"]');
+  check("extras closed before anything is restored", await page.$eval("#bf-extras", (d) => !d.open));
+  await page.evaluate((agents) => {
+    document.getElementById("bf-notes").value = "Gate code 1234";
+    if (!agents) document.getElementById("bf-referral").value = "FRIEND10";
+    document.getElementById("bf-postcode").value = "SW1A 1AA";
+    window.dispatchEvent(new Event("pageshow"));
+  }, agents);
+  check("extras open when notes were restored", await page.$eval("#bf-extras", (d) => d.open));
+  check("a restored postcode outside the area shows the WhatsApp offer", await page.isVisible("#bf-area-msg a.btn-wa"));
+  await context.close();
+  const again = await openPage(browser, base + file);
+  await again.page.click('#group-rooms .item-row:nth-child(1) button[data-action="inc"]');
+  await again.page.evaluate(() => {
+    document.querySelector('input[name="bf-parking"]').checked = true;
+    window.dispatchEvent(new Event("pageshow"));
+  });
+  check("extras open when a parking answer was restored", await again.page.$eval("#bf-extras", (d) => d.open));
+  await again.context.close();
 }
 
 (async () => {
@@ -307,6 +377,8 @@ async function laterClean(browser, base) {
     await bookingPage(browser, base, "index.html");
     await bookingPage(browser, base, "agents.html");
     await laterClean(browser, base);
+    await restoredExtras(browser, base, "index.html");
+    await restoredExtras(browser, base, "agents.html");
     await accessibility(browser, base, "index.html");
     await accessibility(browser, base, "agents.html");
   } finally {

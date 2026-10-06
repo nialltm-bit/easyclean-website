@@ -19,6 +19,9 @@
  * Which boxes must be filled in comes from the "required" attribute on the
  * form's boxes, so making a box required needs no change here. The agent
  * page's "Access on the day" choice is handled below whenever a page has it.
+ * The form's order is postcode, time, contact details, then the closed
+ * "Anything else?" section (#bf-extras). None of that order matters to the
+ * code here: every box is found by its id.
  */
 window.ecBooking = function (config) {
   "use strict";
@@ -562,9 +565,29 @@ window.ecBooking = function (config) {
   document.getElementById("booking-form").addEventListener("input", updateSubmitEnabled);
   document.getElementById("booking-form").addEventListener("change", updateSubmitEnabled);
 
+  // ---- "Anything else?" (parking, notes, referral code or reference) ----
+  // Closed to start with. Browsers can restore what was typed in it on reload
+  // or Back, so it opens if anything is in there, and the customer can see
+  // what will be sent. The postcode is looked at again for the same reason,
+  // so a restored postcode outside the area shows the WhatsApp offer.
+  var extras = document.getElementById("bf-extras");
+  function openExtrasIfFilled() {
+    if (!extras || extras.open) return;
+    var boxes = extras.querySelectorAll('input[type="text"], textarea');
+    var filled = !!extras.querySelector('input[type="radio"]:checked') ||
+      Array.prototype.some.call(boxes, function (el) { return el.value.trim() !== ""; });
+    if (filled) extras.open = true;
+  }
+  openExtrasIfFilled();
+  window.addEventListener("pageshow", function () {
+    openExtrasIfFilled();
+    renderAreaMsg();
+    updateSubmitEnabled();
+  });
+
   // ---- Access on the day (agent page) ----
-  // A named person on site, or the agent arranging access with us at least
-  // 24 hours before (no one named at booking). Only on pages that ask.
+  // The agent arranging access with us at least 24 hours before (no one named
+  // at booking, the default), or a named person on site. Only on pages that ask.
   var accessChoices = document.querySelectorAll('input[name="bf-access"]');
   function accessArrange() {
     var el = document.querySelector('input[name="bf-access"]:checked');
