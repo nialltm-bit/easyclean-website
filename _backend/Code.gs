@@ -672,6 +672,7 @@ function createBooking(data) {
   }
   var badInput = validateBookingInput(data);
   if (badInput) return { ok: false, error: badInput };
+  data.notes = websiteBookingNotes_(data);
   var rate = bookingRateExceeded();
   if (rate) {
     if (rate === true) notifyOwner("Bookings paused: unusual number in the last hour",
@@ -712,7 +713,7 @@ function validateBookingInput(data) {
   // Phone: free text is fine ("07700 900000, evenings"), as long as there's a number in it.
   if (data.phone.length > 40 || data.phone.replace(/\D/g, "").length < 7) return "bad_details";
   if (!data.address || data.address.length > 300) return "bad_details";
-  var limits = { postcode: 12, businessName: 120, siteContactName: 100, siteContactPhone: 40, agencyId: 60, referralCode: 40, slotLabel: 80 };
+  var limits = { postcode: 12, businessName: 120, siteContactName: 100, siteContactPhone: 40, agencyId: 60, referralCode: 40, slotLabel: 80, parking: 60, notes: 400 };
   for (var k in limits) {
     if (data[k] !== undefined && data[k] !== null && String(data[k]).length > limits[k]) return "bad_details";
   }
@@ -721,13 +722,23 @@ function validateBookingInput(data) {
   return null;
 }
 
+// The booking form's optional parking answer and notes box, as one line for
+// the Notes column, calendar event and admin app ("Parking: ... . notes").
+// Kept on one line, like notes typed in the admin app.
+function websiteBookingNotes_(data) {
+  var str = function (v) { return typeof v === "string" ? v.replace(/\s+/g, " ").trim() : ""; };
+  var parking = str(data.parking);
+  return [parking ? "Parking: " + parking + "." : "", str(data.notes)].filter(String).join(" ");
+}
+
 function createBookingLocked_(data) {
-  // The agent/landlord form (agents.html) needs a business name, plus
-  // either a named contact on site or the agent choosing to arrange access
-  // with us at least 24 hours before. Enforced here too, since both forms
-  // POST to this same endpoint.
+  // The agent/landlord form (agents.html) needs either a named contact on
+  // site or the agent choosing to arrange access with us at least 24 hours
+  // before. Enforced here too, since both forms POST to this same endpoint.
+  // The business name is optional: a private landlord without one books
+  // under their own name, the same as in the admin app.
   if (data.channel === "Agent/Landlord") {
-    if (!data.businessName) return { ok: false, error: "missing_fields" };
+    if (!data.businessName) data.businessName = data.name;
     if (!data.accessArrange && (!data.siteContactName || !data.siteContactPhone)) {
       return { ok: false, error: "missing_fields" };
     }
@@ -2341,6 +2352,7 @@ function adminJobSummary(v, start) {
     name: isAgent ? v["Business name"] : v.Name,
     contact: isAgent ? (v["Site contact name"] || "") : "",
     access: isAgent ? (v.Access || (v["Site contact name"] ? "Someone on site" : "")) : "",
+    notes: v.Notes || "",
     address: v.Address,
     items: v.Items,
     total: v["Cancellation fee"] || v.Total,
@@ -3803,7 +3815,7 @@ function checkBookingSystem() {
 function sendNewBookingAlert(data, reference, jobToken, start, priced) {
   var when = Utilities.formatDate(start, TIMEZONE, "EEE d MMM 'at' h:mma").replace("AM", "am").replace("PM", "pm");
   var isAgent = data.channel === "Agent/Landlord";
-  var who = isAgent ? data.businessName + " (" + data.name + ")" : data.name;
+  var who = isAgent && data.businessName !== data.name ? data.businessName + " (" + data.name + ")" : data.name;
   var lines = [
     who + " booked " + when + ".",
     "",
@@ -3818,6 +3830,7 @@ function sendNewBookingAlert(data, reference, jobToken, start, priced) {
   if (isAgent) lines.push("Access: " + accessEmailText(data));
   if (data.referralCode) lines.push("Referral/offer code: " + data.referralCode);
   if (data.agencyId) lines.push("Agent's reference: " + data.agencyId);
+  if (data.notes) lines.push("Notes: " + data.notes);
   if (priced && priced.adjusted) lines.push("", "NOTE: the page showed " + priced.pageTotal + " but the price list gives " + data.total + ". Booked at " + data.total + ".");
   if (data.areaUnchecked) lines.push("", "NOTE: the service area list couldn't be read, so the postcode wasn't checked. Worth a quick look at where this is.");
   if (priced && priced.verified === false) lines.push("", "NOTE: the price list couldn't be checked, so this was booked at the price the page sent. Worth a quick check.");

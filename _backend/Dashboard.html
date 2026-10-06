@@ -612,7 +612,7 @@
       '<h1>' + esc(j.name) + '</h1>' +
       '<div class="card">' +
         detail("When", j.when) + detail("Address", j.address) + detail("Site contact", j.contact) + detail("Access", j.access) +
-        detail("What", j.items) + detail("Total", (j.bookingTotal || j.total) + " · " + j.payment) + detail("Reference", j.reference) +
+        detail("What", j.items) + detail("Total", (j.bookingTotal || j.total) + " · " + j.payment) + detail("Notes", j.notes) + detail("Reference", j.reference) +
       '</div>';
     if (j.cancelled) {
       app(head + '<div class="card">' +

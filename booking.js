@@ -666,6 +666,10 @@ window.ecBooking = function (config) {
     Object.keys(config.extraFields || {}).forEach(function (key) {
       payload[key] = value(config.extraFields[key]);
     });
+    // Optional on both forms. The booking system adds them to the job's notes.
+    var parking = document.querySelector('input[name="bf-parking"]:checked');
+    payload.parking = parking ? parking.value : "";
+    payload.notes = document.getElementById("bf-notes") ? value("bf-notes") : "";
     if (accessChoices.length) {
       payload.accessArrange = accessArrange();
       payload.siteContactName = accessArrange() ? "" : value("bf-site-contact-name");

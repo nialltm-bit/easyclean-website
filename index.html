@@ -673,7 +673,7 @@ layout: null
   fieldset.bf-row { border: 0; padding: 0; margin-left: 0; margin-right: 0; }
   .bf-row legend { float: left; padding: 0; }
   .bf-row label, .bf-row legend, .bf-row .bf-label { font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate); font-weight: 600; }
-  .bf-row input[type="text"], .bf-row input[type="tel"], .bf-row input[type="email"] {
+  .bf-row input[type="text"], .bf-row input[type="tel"], .bf-row input[type="email"], .bf-row textarea {
     width: 100%;
     min-width: 0;
     padding: 13px 12px;
@@ -689,6 +689,11 @@ layout: null
     .bf-row-wide { grid-column: auto; }
   }
   .bf-row input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .bf-row textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
+  .bf-row textarea:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .bf-hint { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--slate); }
+  .bf-row label.bf-choice { display: flex; align-items: center; gap: 10px; font-size: 14.5px; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); cursor: pointer; padding: 6px 0; }
+  .bf-choice input[type="radio"] { width: 18px; height: 18px; flex: none; accent-color: var(--teal); margin: 0; }
   .bf-radio { display: flex; gap: 18px; margin-top: 2px; }
   .bf-radio label { display: flex; align-items: center; gap: 6px; font-size: 14.5px; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); }
   .bf-row label.bf-checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink-soft); cursor: pointer; }
@@ -1194,6 +1199,12 @@ layout: null
             <div class="bf-row-wide bf-area-msg" id="bf-area-msg" style="display:none;"></div>
           </div>
           <fieldset class="bf-row">
+            <legend>Is there parking, or a visitor permit? <span style="text-transform:none; font-weight:400;">(optional)</span></legend>
+            <label class="bf-choice"><input type="radio" name="bf-parking" value="Driveway or free parking"> Driveway or free parking close by</label>
+            <label class="bf-choice"><input type="radio" name="bf-parking" value="Permit zone, visitor permit provided"> Permit zone, and there&#8217;ll be a visitor permit for us</label>
+            <label class="bf-choice"><input type="radio" name="bf-parking" value="Permit or paid parking only"> Permit or paid parking only</label>
+          </fieldset>
+          <fieldset class="bf-row">
             <legend>How would you like to pay?</legend>
             <div class="bf-radio">
               <label><input type="radio" name="bf-payment" value="Cash" checked> Cash</label>
@@ -1211,6 +1222,11 @@ layout: null
             <div id="bf-slots-label" class="bf-slot-day"></div>
             <div id="bf-slots" class="bf-slots"></div>
           </fieldset>
+          <div class="bf-row">
+            <label for="bf-notes">Anything we should know? <span style="text-transform:none; font-weight:400;">(optional)</span></label>
+            <p class="bf-hint" id="bf-notes-hint">For example pets, a gate code, or a stain you&#8217;d like us to look at.</p>
+            <textarea id="bf-notes" rows="3" maxlength="400" aria-describedby="bf-notes-hint"></textarea>
+          </div>
           <div class="bf-row">
             <label for="bf-referral">Referral or offer code <span style="text-transform:none; font-weight:400;">(optional)</span></label>
             <input type="text" id="bf-referral" autocomplete="off">

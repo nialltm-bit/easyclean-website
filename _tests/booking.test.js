@@ -121,7 +121,7 @@ async function bookingPage(browser, base, file) {
   check("Confirm switches on once everything is filled in", !(await confirmOff()));
   if (agents) {
     await page.fill("#bf-business", "");
-    check("agent page: Confirm goes off without a business name", await confirmOff());
+    check("agent page: business name is optional (private landlords)", !(await confirmOff()));
     await page.fill("#bf-business", "Acme Lettings");
   }
 
@@ -149,6 +149,8 @@ async function bookingPage(browser, base, file) {
   if (!agents) {
     await page.check('input[name="bf-payment"][value="Bank transfer"]');
     await page.fill("#bf-referral", "FRIEND10");
+    await page.check('input[name="bf-parking"][value="Permit zone, visitor permit provided"]');
+    await page.fill("#bf-notes", "Dog in the kitchen.\nStain by the sofa.");
   } else {
     await page.fill("#bf-agency-id", "REF-9");
   }
@@ -161,6 +163,8 @@ async function bookingPage(browser, base, file) {
   check("booking sends the chosen time", sent.startTime === "2026-10-06T08:00:00Z" && sent.slotLabel === "Tue 6 Oct, 9:00am", [sent.startTime, sent.slotLabel]);
   check("booking sends the basket for re-pricing", JSON.stringify(sent.lineItems) === JSON.stringify([{ item: "Small room", qty: 2 }, { item: "Armchair", qty: 1 }]), sent.lineItems);
   check("booking sends the full address with postcode", sent.address === "1 High Street, BA1 1AA" && sent.postcode === "BA1 1AA");
+  if (agents) check("parking and notes are optional", sent.parking === "" && sent.notes === "", [sent.parking, sent.notes]);
+  else check("booking sends the parking answer and notes", sent.parking === "Permit zone, visitor permit provided" && sent.notes === "Dog in the kitchen.\nStain by the sofa.", [sent.parking, sent.notes]);
   if (agents) {
     check("agent booking: channel and invoice payment", sent.channel === "Agent/Landlord" && sent.payment === "Invoice, 14 days");
     check("agent booking: business, account reference and arranged access", sent.businessName === "Acme Lettings" && sent.agencyId === "REF-9" && sent.accessArrange === true && sent.siteContactName === "" && sent.siteContactPhone === "");
@@ -221,7 +225,8 @@ async function accessibility(browser, base, file) {
   check("picking a time keeps focus on that time", time.cls.includes("bf-slot-btn") && time.pressed === "true", time);
 
   const legends = await page.$$eval("fieldset > legend", (els) => els.map((e) => e.textContent.trim()));
-  const expected = agents ? ["Access on the day", "Choose a time"] : ["How would you like to pay?", "Choose a time"];
+  const parking = "Is there parking, or a visitor permit? (optional)";
+  const expected = agents ? ["Access on the day", parking, "Choose a time"] : [parking, "How would you like to pay?", "Choose a time"];
   check("choice groups have a fieldset and legend", JSON.stringify(legends) === JSON.stringify(expected), legends);
 
   await page.fill("#bf-name", "Test Person");
