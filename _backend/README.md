@@ -28,6 +28,7 @@ Check these before changing either side.
   - The page shows whatever days come back.
   - `DAYS_AHEAD` in Code.gs sets the window (21 days).
   - `WEEKLY_SLOTS` sets the start times.
+  - **Days with no times:** the booking system only sends free times, so `booking.js` draws every calendar day itself (Sundays and fully booked days show as dashed cards that say "No times"). To do that it copies two numbers from Code.gs: `LEAD_TIME_HOURS` (24) and `DAYS_AHEAD` (21). If you change either in Code.gs, change it in `booking.js` too. If they drift apart, no free time is ever hidden, only the empty days at the ends of the list are wrong.
 - **Bookings:** `booking.js` sends `POST { action: "book", ... }` as JSON. Code.gs checks every field again and sends back `ok` or an error code that the page understands.
   - **Optional fields:** `parking` (the radio button's value, up to 60 characters) and `notes` (up to 400). Code.gs joins them into the job's Notes as "Parking: ... ." followed by the notes.
   - **Emails ask for the extras (FRE-209):** the booking form keeps parking, notes and the code under a closed "Anything else?" link, so many customers leave them empty. When `notes` is empty (it already holds the parking answer), the confirmation and day-before emails add a line asking them to reply with parking, pets, gate codes or stains. The morning-of reminder doesn't.

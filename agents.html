@@ -712,6 +712,9 @@ layout: null
   .bf-day-card:hover { border-color: var(--teal); }
   .bf-day-card.selected { border-color: var(--teal); background: color-mix(in srgb, var(--teal) 8%, var(--surface)); }
   .bf-day-card.selected .dow, .bf-day-card.selected .mon, .bf-day-card.selected .dom { color: var(--teal-deep); }
+  /* A day with no times (Sunday, or fully booked): still there to click, but quieter. */
+  .bf-day-card.no-times { border-style: dashed; }
+  .bf-day-card.no-times .dom { color: var(--slate); }
   .bf-day-skel {
     flex: 1 1 0;
     min-width: 0;

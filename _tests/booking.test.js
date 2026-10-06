@@ -100,7 +100,22 @@ async function bookingPage(browser, base, file) {
   await page.waitForSelector("#bf-slots-retry");
   await page.click("#bf-slots-retry");
   await page.waitForSelector(".bf-day-card");
-  check("Try again loads the available days", (await page.$$(".bf-day-card")).length === 2);
+  // Every calendar day shows, even with no times. The page's clock is Thu 1 Oct, the fake times
+  // are Mon 5 and Tue 6 Oct only, so Fri 2, Sat 3 and Sun 4 have none.
+  const cards = () => page.$$eval(".bf-day-card", (els) => els.map((e) => ({ day: e.getAttribute("data-day"), empty: e.classList.contains("no-times"), selected: e.classList.contains("selected") })));
+  const first = await cards();
+  check("the days run on without gaps, so Friday is followed by Saturday, Sunday, then Monday", JSON.stringify(first.slice(0, 5).map((c) => c.day)) === JSON.stringify(["Fri 2 Oct", "Sat 3 Oct", "Sun 4 Oct", "Mon 5 Oct", "Tue 6 Oct"]), first.map((c) => c.day));
+  check("a week of days shows at a time", first.length === 7, first.length);
+  check("days with no times are marked, days with times are not", first.every((c) => c.empty === !["Mon 5 Oct", "Tue 6 Oct"].includes(c.day)), first);
+  check("the first day with times is the one selected", first.find((c) => c.selected).day === "Mon 5 Oct", first);
+  check("a day with no times says so to screen readers", (await page.getAttribute('.bf-day-card[data-day="Sun 4 Oct"]', "aria-label")) === "Sun 4 Oct, no times available");
+  await page.click('.bf-day-card[data-day="Sun 4 Oct"]');
+  check("clicking a Sunday shows that it has no times", (await page.textContent("#bf-slots-label")) === "No times on Sun 4 Oct" && (await page.$$(".bf-slot-btn")).length === 0, await page.textContent("#bf-slots-label"));
+  check("and offers WhatsApp instead", (await page.textContent("#bf-slots")).includes("WhatsApp"));
+  await page.click(".bf-days-nav-btn >> nth=1");
+  await page.click(".bf-days-nav-btn >> nth=0");
+  await page.click('.bf-day-card[data-day="Mon 5 Oct"]');
+  check("clicking a day with times shows them again", (await page.$$(".bf-slot-btn")).length === 1);
 
   // The form runs postcode, time, contact details, payment, then the closed extras.
   const order = await page.evaluate((agents) => {
@@ -266,6 +281,12 @@ async function accessibility(browser, base, file) {
   await page.keyboard.press("Enter");
   const day = await focused();
   check("picking a day keeps focus on that day", day.day === "Tue 6 Oct" && day.pressed === "true", day);
+  await page.focus('.bf-day-card[data-day="Sun 4 Oct"]');
+  await page.keyboard.press("Enter");
+  check("a day with no times is read out when picked", await waitToHear("No times on Sun 4 Oct"), await spoken());
+  check("and focus stays on it", (await focused()).day === "Sun 4 Oct");
+  await page.focus('.bf-day-card[data-day="Tue 6 Oct"]');
+  await page.keyboard.press("Enter");
   await page.focus(".bf-slot-btn >> nth=0");
   await page.keyboard.press("Enter");
   const time = await focused();
