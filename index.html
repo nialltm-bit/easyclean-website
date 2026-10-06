@@ -693,6 +693,23 @@ layout: null
   .bf-row textarea:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .bf-hint { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--slate); }
   .bf-row[hidden] { display: none; }
+  /* The area note sits under the postcode box, inside its row. */
+  .bf-postcode .bf-area-msg { margin-top: 4px; }
+  /* Name and phone share a row, even on a phone: the other boxes need the width. */
+  .bf-details { margin-top: 16px; }
+  @media (max-width: 480px) {
+    .bf-details { grid-template-columns: 1fr 1fr; gap: 14px 10px; }
+    .bf-details .bf-row-wide { grid-column: 1 / -1; }
+  }
+  @media (min-width: 600px) { .bf-postcode input { max-width: 240px; } }
+  /* Parking, notes and the code sit under one closed link (FRE-209). It is a
+     real details/summary, so keyboards and screen readers get open/closed. */
+  .bf-extras { margin-top: 8px; }
+  .bf-extras summary { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; cursor: pointer; list-style: none; font-size: 15px; font-weight: 600; color: var(--teal-deep); text-decoration: underline; text-underline-offset: 3px; }
+  .bf-extras summary::-webkit-details-marker { display: none; }
+  .bf-extras summary::before { content: ""; width: 7px; height: 7px; flex: none; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg); }
+  .bf-extras[open] summary::before { transform: rotate(45deg); }
+  .bf-extras summary:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 3px; }
   .bf-terms { margin: 16px 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
   .bf-terms a { color: var(--teal-deep); font-weight: 600; }
   .bf-row label.bf-checkbox-row.bf-early-start { align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink); line-height: 1.5; }
@@ -1195,27 +1212,11 @@ layout: null
           <div aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden;">
             <label for="bf-hp">Leave this empty</label><input type="text" id="bf-hp" name="bf-hp" tabindex="-1" autocomplete="off">
           </div>
-          <div class="bf-grid">
-            <div class="bf-row"><label for="bf-name">Name</label><input type="text" id="bf-name" autocomplete="name" required></div>
-            <div class="bf-row"><label for="bf-phone">Phone</label><input type="tel" id="bf-phone" autocomplete="tel" required></div>
-            <div class="bf-row bf-row-wide"><label for="bf-email">Email</label><input type="email" id="bf-email" autocomplete="email" required></div>
-            <div class="bf-row bf-row-wide"><label for="bf-address">Address</label><input type="text" id="bf-address" autocomplete="street-address" required></div>
-            <div class="bf-row"><label for="bf-postcode">Postcode</label><input type="text" id="bf-postcode" autocomplete="postal-code" required></div>
-            <div class="bf-row-wide bf-area-msg" id="bf-area-msg" style="display:none;"></div>
+          <div class="bf-row bf-postcode">
+            <label for="bf-postcode">Postcode</label>
+            <input type="text" id="bf-postcode" autocomplete="postal-code" required>
+            <div class="bf-area-msg" id="bf-area-msg" style="display:none;"></div>
           </div>
-          <fieldset class="bf-row">
-            <legend>Is there parking, or a visitor permit? <span style="text-transform:none; font-weight:400;">(optional)</span></legend>
-            <label class="bf-choice"><input type="radio" name="bf-parking" value="Driveway or free parking"> Driveway or free parking close by</label>
-            <label class="bf-choice"><input type="radio" name="bf-parking" value="Permit zone, visitor permit provided"> Permit zone, and there&#8217;ll be a visitor permit for us</label>
-            <label class="bf-choice"><input type="radio" name="bf-parking" value="Permit or paid parking only"> Permit or paid parking only</label>
-          </fieldset>
-          <fieldset class="bf-row">
-            <legend>How would you like to pay?</legend>
-            <div class="bf-radio">
-              <label><input type="radio" name="bf-payment" value="Cash" checked> Cash</label>
-              <label><input type="radio" name="bf-payment" value="Bank transfer"> Bank transfer</label>
-            </div>
-          </fieldset>
           <fieldset class="bf-row">
             <legend>Choose a time</legend>
             <div id="bf-days-nav" class="bf-days-nav">
@@ -1227,21 +1228,43 @@ layout: null
             <div id="bf-slots-label" class="bf-slot-day"></div>
             <div id="bf-slots" class="bf-slots"></div>
           </fieldset>
-          <div class="bf-row">
-            <label for="bf-notes">Anything we should know? <span style="text-transform:none; font-weight:400;">(optional)</span></label>
-            <p class="bf-hint" id="bf-notes-hint">For example pets, a gate code, or a stain you&#8217;d like us to look at.</p>
-            <textarea id="bf-notes" rows="3" maxlength="400" aria-describedby="bf-notes-hint"></textarea>
+          <div class="bf-grid bf-details">
+            <div class="bf-row"><label for="bf-name">Name</label><input type="text" id="bf-name" autocomplete="name" required></div>
+            <div class="bf-row"><label for="bf-phone">Phone</label><input type="tel" id="bf-phone" autocomplete="tel" required></div>
+            <div class="bf-row bf-row-wide"><label for="bf-email">Email</label><input type="email" id="bf-email" autocomplete="email" required></div>
+            <div class="bf-row bf-row-wide"><label for="bf-address">House number and street</label><input type="text" id="bf-address" autocomplete="address-line1" required></div>
           </div>
-          <div class="bf-row">
-            <label for="bf-referral">Referral or offer code <span style="text-transform:none; font-weight:400;">(optional)</span></label>
-            <input type="text" id="bf-referral" autocomplete="off">
-          </div>
+          <fieldset class="bf-row">
+            <legend>How would you like to pay?</legend>
+            <div class="bf-radio">
+              <label><input type="radio" name="bf-payment" value="Cash" checked> Cash</label>
+              <label><input type="radio" name="bf-payment" value="Bank transfer"> Bank transfer</label>
+            </div>
+          </fieldset>
+          <details class="bf-extras" id="bf-extras">
+            <summary>Anything else? (parking, pets, a code)</summary>
+            <fieldset class="bf-row">
+              <legend>Is there parking, or a visitor permit? <span style="text-transform:none; font-weight:400;">(optional)</span></legend>
+              <label class="bf-choice"><input type="radio" name="bf-parking" value="Driveway or free parking"> Driveway or free parking close by</label>
+              <label class="bf-choice"><input type="radio" name="bf-parking" value="Permit zone, visitor permit provided"> Permit zone, and there&#8217;ll be a visitor permit for us</label>
+              <label class="bf-choice"><input type="radio" name="bf-parking" value="Permit or paid parking only"> Permit or paid parking only</label>
+            </fieldset>
+            <div class="bf-row">
+              <label for="bf-notes">Anything we should know? <span style="text-transform:none; font-weight:400;">(optional)</span></label>
+              <p class="bf-hint" id="bf-notes-hint">For example pets, a gate code, or a stain you&#8217;d like us to look at.</p>
+              <textarea id="bf-notes" rows="3" maxlength="400" aria-describedby="bf-notes-hint"></textarea>
+            </div>
+            <div class="bf-row">
+              <label for="bf-referral">Referral or offer code <span style="text-transform:none; font-weight:400;">(optional)</span></label>
+              <input type="text" id="bf-referral" autocomplete="off">
+            </div>
+          </details>
           <div class="bf-row">
             <label class="bf-checkbox-row"><input type="checkbox" id="bf-marketing"> Keep me posted about seasonal offers and cleaning reminders</label>
           </div>
           <!-- Shown by booking.js when the chosen time is within the 14-day cancellation period. -->
           <div class="bf-row" id="bf-early-row" hidden>
-            <label class="bf-checkbox-row bf-early-start"><input type="checkbox" id="bf-early-start"> I ask EasyClean Somerset to carry out my clean within my 14-day cancellation period. I understand I&#8217;ll pay for any work done if I cancel after it starts, and that I lose my right to cancel once the clean is complete.</label>
+            <label class="bf-checkbox-row bf-early-start"><input type="checkbox" id="bf-early-start"> I ask EasyClean Somerset to start my clean within my 14-day cancellation period. If I cancel after it starts, I&#8217;ll pay for the work done. Once it&#8217;s finished, I can&#8217;t cancel.</label>
           </div>
           <p class="bf-terms">By confirming, you agree to our <a href="terms.html">terms and conditions</a>, including your right to cancel in <a href="terms.html#cancel">section 11</a>.</p>
           <button type="submit" class="btn btn-primary" id="bf-submit" disabled>Confirm booking</button>

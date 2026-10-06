@@ -30,6 +30,7 @@ Check these before changing either side.
   - `WEEKLY_SLOTS` sets the start times.
 - **Bookings:** `booking.js` sends `POST { action: "book", ... }` as JSON. Code.gs checks every field again and sends back `ok` or an error code that the page understands.
   - **Optional fields:** `parking` (the radio button's value, up to 60 characters) and `notes` (up to 400). Code.gs joins them into the job's Notes as "Parking: ... ." followed by the notes.
+  - **Emails ask for the extras (FRE-209):** the booking form keeps parking, notes and the code under a closed "Anything else?" link, so many customers leave them empty. When `notes` is empty (it already holds the parking answer), the confirmation and day-before emails add a line asking them to reply with parking, pets, gate codes or stains. The morning-of reminder doesn't.
   - **Agent page:** the business name is optional. If it's blank, Code.gs uses the person's name, the same as the admin app does for a private landlord.
   - **Early start (home page only):** `earlyStart` is `true` when the customer ticked the box asking us to clean within their 14-day cancellation period. The page shows the box when the chosen time is within 14 days of today, and Code.gs works that out again with `CANCEL_DAYS`. Both use UK dates. A booking without the tick is never refused: Code.gs records "Not given" and flags it in the new-booking email.
 - **Prices:**
@@ -53,5 +54,7 @@ The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. I
 - Trader details at the foot of every customer email: name and town, a link to the business details in the terms, and the email address (FRE-189). Customer emails go out through `sendCustomerEmail_`, which adds them to the plain-text version. The HTML builders add `traderHtml_()`.
 - Booking form parking question and notes box, and an optional business name for private landlords (FRE-192). Notes now show in the new-booking email and the admin app's job view.
 - Consumer Contracts Regulations (FRE-181): an "Early start request" column, a line in the new-booking email, and the right-to-cancel information with the model cancellation form in homeowner confirmation emails. Agent bookings are unchanged.
+
+- Confirmation and day-before emails ask for parking, pets and gate codes by reply when the booking has no notes (FRE-209). The website form change in the same ticket needs no Apps Script change: the fields it sends are the same.
 
 This matches Apps Script once that version is deployed.
