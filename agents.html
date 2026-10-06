@@ -614,7 +614,7 @@ layout: null
   fieldset.bf-row { border: 0; padding: 0; margin-left: 0; margin-right: 0; }
   .bf-row legend { float: left; padding: 0; }
   .bf-row label, .bf-row legend, .bf-row .bf-label { font-size: 13.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate); font-weight: 600; }
-  .bf-row input[type="text"], .bf-row input[type="tel"], .bf-row input[type="email"] {
+  .bf-row input[type="text"], .bf-row input[type="tel"], .bf-row input[type="email"], .bf-row textarea {
     width: 100%;
     min-width: 0;
     padding: 13px 12px;
@@ -630,6 +630,12 @@ layout: null
     .bf-row-wide { grid-column: auto; }
   }
   .bf-row input:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .bf-row textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
+  .bf-row textarea:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
+  .bf-hint { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--slate); }
+  .bf-row[hidden] { display: none; }
+  .bf-terms { margin: 16px 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
+  .bf-terms a { color: var(--teal-deep); font-weight: 600; }
   .bf-pay-note { margin: 2px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--ink); }
   .bf-row label.bf-choice { display: flex; align-items: center; gap: 10px; font-size: 15px; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--ink); cursor: pointer; padding: 6px 0; }
   .bf-choice input[type="radio"] { width: 18px; height: 18px; flex: none; accent-color: var(--teal); margin: 0; }
@@ -1071,7 +1077,7 @@ layout: null
           </div>
           <div class="bf-grid">
             <div class="bf-row"><label for="bf-name">Your name</label><input type="text" id="bf-name" autocomplete="name" required></div>
-            <div class="bf-row bf-row-wide"><label for="bf-business">Business / agency name</label><input type="text" id="bf-business" autocomplete="organization" required></div>
+            <div class="bf-row bf-row-wide"><label for="bf-business">Business / agency name <span style="text-transform:none; font-weight:400;">(private landlords can leave this blank)</span></label><input type="text" id="bf-business" autocomplete="organization"></div>
             <div class="bf-row"><label for="bf-phone">Your phone</label><input type="tel" id="bf-phone" autocomplete="tel" required></div>
             <div class="bf-row bf-row-wide"><label for="bf-email">Your email</label><input type="email" id="bf-email" autocomplete="email" required></div>
             <div class="bf-row bf-row-wide"><label for="bf-address">Property address</label><input type="text" id="bf-address" autocomplete="street-address" required></div>
@@ -1087,6 +1093,12 @@ layout: null
             </div>
             <label class="bf-choice"><input type="radio" name="bf-access" value="arrange"> We&#8217;ll arrange access with you at least 24 hours before</label>
             <p class="bf-pay-note" id="bf-access-note" style="display:none;">Just get in touch at least 24 hours before the clean to let us know how we&#8217;ll get in, for example keys from your office, a lockbox code or the tenant&#8217;s details.</p>
+          </fieldset>
+          <fieldset class="bf-row">
+            <legend>Is there parking, or a visitor permit? <span style="text-transform:none; font-weight:400;">(optional)</span></legend>
+            <label class="bf-choice"><input type="radio" name="bf-parking" value="Driveway or free parking"> Driveway or free parking close by</label>
+            <label class="bf-choice"><input type="radio" name="bf-parking" value="Permit zone, visitor permit provided"> Permit zone, and there&#8217;ll be a visitor permit for us</label>
+            <label class="bf-choice"><input type="radio" name="bf-parking" value="Permit or paid parking only"> Permit or paid parking only</label>
           </fieldset>
           <div class="bf-row">
             <span class="bf-label">Payment</span>
@@ -1104,12 +1116,18 @@ layout: null
             <div id="bf-slots" class="bf-slots"></div>
           </fieldset>
           <div class="bf-row">
+            <label for="bf-notes">Anything we should know? <span style="text-transform:none; font-weight:400;">(optional)</span></label>
+            <p class="bf-hint" id="bf-notes-hint">For example pets, a gate code, or a stain you&#8217;d like us to look at.</p>
+            <textarea id="bf-notes" rows="3" maxlength="400" aria-describedby="bf-notes-hint"></textarea>
+          </div>
+          <div class="bf-row">
             <label for="bf-agency-id">Account / reference number <span style="text-transform:none; font-weight:400;">(optional)</span></label>
             <input type="text" id="bf-agency-id" autocomplete="off">
           </div>
           <div class="bf-row">
             <label class="bf-checkbox-row"><input type="checkbox" id="bf-marketing"> Keep me posted about availability and landlord/agent offers</label>
           </div>
+          <p class="bf-terms">By confirming, you agree to our <a href="terms.html">terms and conditions</a>.</p>
           <button type="submit" class="btn btn-primary" id="bf-submit" disabled>Confirm booking</button>
           <div id="bf-status" class="bf-status" style="display:none;"></div>
           <div class="bf-alt-day">Can&#8217;t find a day that works? <a href="#" target="_blank" rel="noopener" id="bf-alt-day-wa">Send us a message</a> and we&#8217;ll sort a time directly.</div>

@@ -435,7 +435,7 @@ function setUpCustomerSheet() {
 function appendCustomerRow(data, reference, slotLabel, jobToken) {
   var sheet = getCustomerSheet();
   if (!sheet) return; // setUpCustomerSheet() hasn't been run yet
-  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes"]);
+  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", "Early start request"]);
   var byHeader = {
     "Timestamp": new Date(),
     "Reference": reference,
@@ -457,7 +457,8 @@ function appendCustomerRow(data, reference, slotLabel, jobToken) {
     "Job token": jobToken || "",
     "Access": data.channel === "Agent/Landlord" ? accessLabel(data) : "",
     "Booked via": data.bookedVia || "Website",
-    "Notes": data.notes || ""
+    "Notes": data.notes || "",
+    "Early start request": earlyStartRecord_(data.cancellation)
     // Completed at / Signature link / Invoice number are deliberately not
     // set here — completeJob() fills those in later, once the job's signed
     // off, the same way it already looks its columns up by header name.
@@ -672,6 +673,7 @@ function createBooking(data) {
   }
   var badInput = validateBookingInput(data);
   if (badInput) return { ok: false, error: badInput };
+  data.notes = websiteBookingNotes_(data);
   var rate = bookingRateExceeded();
   if (rate) {
     if (rate === true) notifyOwner("Bookings paused: unusual number in the last hour",
@@ -712,7 +714,7 @@ function validateBookingInput(data) {
   // Phone: free text is fine ("07700 900000, evenings"), as long as there's a number in it.
   if (data.phone.length > 40 || data.phone.replace(/\D/g, "").length < 7) return "bad_details";
   if (!data.address || data.address.length > 300) return "bad_details";
-  var limits = { postcode: 12, businessName: 120, siteContactName: 100, siteContactPhone: 40, agencyId: 60, referralCode: 40, slotLabel: 80 };
+  var limits = { postcode: 12, businessName: 120, siteContactName: 100, siteContactPhone: 40, agencyId: 60, referralCode: 40, slotLabel: 80, parking: 60, notes: 400 };
   for (var k in limits) {
     if (data[k] !== undefined && data[k] !== null && String(data[k]).length > limits[k]) return "bad_details";
   }
@@ -721,13 +723,102 @@ function validateBookingInput(data) {
   return null;
 }
 
+// The booking form's optional parking answer and notes box, as one line for
+// the Notes column, calendar event and admin app ("Parking: ... . notes").
+// Kept on one line, like notes typed in the admin app.
+function websiteBookingNotes_(data) {
+  var str = function (v) { return typeof v === "string" ? v.replace(/\s+/g, " ").trim() : ""; };
+  var parking = str(data.parking);
+  return [parking ? "Parking: " + parking + "." : "", str(data.notes)].filter(String).join(" ");
+}
+
+// ---- Consumer Contracts Regulations 2013: the 14-day right to cancel ----
+// A homeowner who books online, by phone or by message can cancel within 14
+// days, counting from the day after booking. To clean inside that time the
+// law needs them to ask us to: the tick box on the website, sent as
+// earlyStart. Agent and landlord bookings are business bookings, so none of
+// this applies to them. Returns null for those.
+var CANCEL_DAYS = 14;
+
+function cancellationInfo_(data, start, bookedAt) {
+  if (data.channel === "Agent/Landlord") return null;
+  bookedAt = bookedAt || new Date();
+  var p = Utilities.formatDate(bookedAt, TIMEZONE, "yyyy-MM-dd").split("-");
+  var lastDay = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] + CANCEL_DAYS, 12)); // midday, so the date is right in UK time
+  return {
+    bookedOn: Utilities.formatDate(bookedAt, TIMEZONE, "d MMMM yyyy"),
+    deadline: Utilities.formatDate(lastDay, TIMEZONE, "EEEE d MMMM yyyy"),
+    within: start ? calendarDaysBetween_(bookedAt, start) <= CANCEL_DAYS : false,
+    earlyStart: data.earlyStart === true
+  };
+}
+
+// What goes in the sheet's "Early start request" column.
+function earlyStartRecord_(c) {
+  if (!c) return "";
+  if (!c.within) return "Not needed (clean is after the 14 days)";
+  return c.earlyStart ? "Yes, ticked at booking" : "Not given";
+}
+
+// The cancellation information and model cancellation form for the
+// confirmation email (Schedule 3 of the regulations), as plain text.
+function cancellationText_(c, reference) {
+  return "YOUR RIGHT TO CANCEL\n" +
+    "You can cancel this booking within 14 days without giving a reason, so until " + c.deadline + ". " +
+    "Reply to this email, WhatsApp us, or use the form below.\n" +
+    (c.within && c.earlyStart ? "You asked us to do your clean within those 14 days. If you cancel after we've started, you'll pay for the work done up to then. Once the clean is complete, you can no longer cancel.\n" : "") +
+    "Full details are in section 11 of our terms: " + SITE_URL + "/terms.html#cancel\n\n" +
+    "CANCELLATION FORM\n" +
+    "(Only fill in and send this form if you want to cancel.)\n" +
+    "To: " + BUSINESS_NAME + " trading as EasyClean Somerset, " + BUSINESS_ADDRESS + ". Email: " + TRADER_EMAIL + "\n" +
+    "I/We hereby give notice that I/We cancel my/our contract for the supply of the following service: cleaning, booking reference " + reference + "\n" +
+    "Ordered on: " + c.bookedOn + "\n" +
+    "Name of consumer(s):\n" +
+    "Address of consumer(s):\n" +
+    "Signature of consumer(s) (only if this form is sent on paper):\n" +
+    "Date:";
+}
+
+// The same, for the HTML confirmation email.
+function cancellationHtml_(c, reference, k) {
+  var esc = escHtml;
+  var p = function (text, extra) {
+    return '<p style="margin:0 0 10px;font-family:' + k.SANS + ';font-size:13.5px;line-height:1.6;color:' + k.SLATE + ';' + (extra || '') + '">' + text + '</p>';
+  };
+  var formLine = function (label, value) {
+    return '<p style="margin:0 0 6px;font-family:' + k.SANS + ';font-size:13px;line-height:1.5;color:' + k.INK + ';">' + label + (value ? ' <strong>' + esc(value) + '</strong>' : '') + '</p>';
+  };
+  return (
+    '<tr><td style="background:' + k.SURFACE + ';border-left:1px solid ' + k.LINE + ';border-right:1px solid ' + k.LINE + ';padding:4px 28px 28px;">' +
+      '<div style="border-top:1px solid ' + k.LINE + ';padding-top:22px;">' +
+        '<div style="font-family:' + k.SANS + ';font-weight:bold;font-size:10.5px;letter-spacing:0.12em;text-transform:uppercase;color:' + k.SLATE + ';margin-bottom:8px;">Your right to cancel</div>' +
+        p('You can cancel this booking within 14 days without giving a reason, so until <strong style="color:' + k.INK + ';">' + esc(c.deadline) + '</strong>. Reply to this email, WhatsApp us, or use the form below.') +
+        (c.within && c.earlyStart ? p('You asked us to do your clean within those 14 days. If you cancel after we&#8217;ve started, you&#8217;ll pay for the work done up to then. Once the clean is complete, you can no longer cancel.') : '') +
+        p('Full details are in <a href="' + SITE_URL + '/terms.html#cancel" style="color:' + k.TEAL_DEEP + ';font-weight:700;">section 11 of our terms</a>.', 'margin-bottom:16px;') +
+        '<div style="border:1px dashed ' + k.LINE + ';border-radius:4px;padding:16px 18px;background:' + k.PAPER + ';">' +
+          '<div style="font-family:' + k.SANS + ';font-weight:bold;font-size:14px;color:' + k.INK + ';margin-bottom:2px;">Cancellation form</div>' +
+          '<p style="margin:0 0 12px;font-family:' + k.SANS + ';font-size:12.5px;color:' + k.SLATE + ';">(Only fill in and send this form if you want to cancel.)</p>' +
+          formLine('To:', BUSINESS_NAME + ' trading as EasyClean Somerset, ' + BUSINESS_ADDRESS + '. Email: ' + TRADER_EMAIL) +
+          formLine('I/We hereby give notice that I/We cancel my/our contract for the supply of the following service:', 'cleaning, booking reference ' + reference) +
+          formLine('Ordered on:', c.bookedOn) +
+          formLine('Name of consumer(s):') +
+          formLine('Address of consumer(s):') +
+          formLine('Signature of consumer(s) (only if this form is sent on paper):') +
+          formLine('Date:') +
+        '</div>' +
+      '</div>' +
+    '</td></tr>'
+  );
+}
+
 function createBookingLocked_(data) {
-  // The agent/landlord form (agents.html) needs a business name, plus
-  // either a named contact on site or the agent choosing to arrange access
-  // with us at least 24 hours before. Enforced here too, since both forms
-  // POST to this same endpoint.
+  // The agent/landlord form (agents.html) needs either a named contact on
+  // site or the agent choosing to arrange access with us at least 24 hours
+  // before. Enforced here too, since both forms POST to this same endpoint.
+  // The business name is optional: a private landlord without one books
+  // under their own name, the same as in the admin app.
   if (data.channel === "Agent/Landlord") {
-    if (!data.businessName) return { ok: false, error: "missing_fields" };
+    if (!data.businessName) data.businessName = data.name;
     if (!data.accessArrange && (!data.siteContactName || !data.siteContactPhone)) {
       return { ok: false, error: "missing_fields" };
     }
@@ -742,6 +833,9 @@ function createBookingLocked_(data) {
   if (!isOfferableSlot(start)) {
     return { ok: false, error: "slot_taken" };
   }
+  // Never refused over this: a missing early-start request is flagged to
+  // Niall instead (the page may have been opened before the box was added).
+  data.cancellation = cancellationInfo_(data, start, new Date());
   var end = new Date(start.getTime() + SLOT_MINS * 60000);
   var cal = CalendarApp.getDefaultCalendar();
 
@@ -860,6 +954,9 @@ function bookingEventDescription_(d, reference, jobLink) {
 }
 
 function sendBookingConfirmation_(data, reference, slotLabel) {
+  // Website bookings work this out with the job's time. Admin-app bookings
+  // still get the information and form, but never the early-start line.
+  var cancel = data.cancellation || cancellationInfo_(data, null, new Date());
   var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" +
     encodeURIComponent("Hi EasyClean Somerset, I need to change my booking. Ref: " + reference);
   // Plain-text fallback — shown by the small number of mail clients that
@@ -874,6 +971,7 @@ function sendBookingConfirmation_(data, reference, slotLabel) {
     (data.channel === "Agent/Landlord" ? "Access: " + accessEmailText(data) + "\n" : "") + "\n" +
     "Reference: " + reference + ". Keep this handy if you need to get in touch.\n\n" +
     "Need to change anything? Just reply to this email or WhatsApp us: " + waLink + "\n\n" +
+    (cancel ? cancellationText_(cancel, reference) + "\n\n" : "") +
     "Thanks,\nEasyClean Somerset";
 
   var htmlBody = buildConfirmationEmailHtml({
@@ -885,7 +983,8 @@ function sendBookingConfirmation_(data, reference, slotLabel) {
     address: data.address,
     reference: reference,
     waLink: waLink,
-    access: data.channel === "Agent/Landlord" ? accessEmailText(data) : ""
+    access: data.channel === "Agent/Landlord" ? accessEmailText(data) : "",
+    cancel: cancel
   });
 
   sendCustomerEmail_(data.email, "Booking confirmed: " + slotLabel, textBody, {
@@ -1019,6 +1118,9 @@ function buildConfirmationEmailHtml(d) {
           '<p style="margin:0 0 16px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Need to change anything? Just reply to this email, or message us directly:</p>' +
           '<a href="' + d.waLink + '" style="display:inline-block;background:' + TEAL + ';color:' + ON_INK + ';font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;text-decoration:none;padding:12px 24px;border-radius:3px;">WhatsApp us</a>' +
         '</td></tr>' +
+
+        // Right to cancel and the cancellation form (homeowners only)
+        (d.cancel ? cancellationHtml_(d.cancel, d.reference, { SANS: SANS, INK: INK, SLATE: SLATE, LINE: LINE, PAPER: PAPER, SURFACE: SURFACE, TEAL_DEEP: TEAL_DEEP }) : '') +
 
         // Footer
         '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:24px 28px;text-align:center;">' +
@@ -2341,6 +2443,7 @@ function adminJobSummary(v, start) {
     name: isAgent ? v["Business name"] : v.Name,
     contact: isAgent ? (v["Site contact name"] || "") : "",
     access: isAgent ? (v.Access || (v["Site contact name"] ? "Someone on site" : "")) : "",
+    notes: v.Notes || "",
     address: v.Address,
     items: v.Items,
     total: v["Cancellation fee"] || v.Total,
@@ -3803,7 +3906,7 @@ function checkBookingSystem() {
 function sendNewBookingAlert(data, reference, jobToken, start, priced) {
   var when = Utilities.formatDate(start, TIMEZONE, "EEE d MMM 'at' h:mma").replace("AM", "am").replace("PM", "pm");
   var isAgent = data.channel === "Agent/Landlord";
-  var who = isAgent ? data.businessName + " (" + data.name + ")" : data.name;
+  var who = isAgent && data.businessName !== data.name ? data.businessName + " (" + data.name + ")" : data.name;
   var lines = [
     who + " booked " + when + ".",
     "",
@@ -3818,6 +3921,12 @@ function sendNewBookingAlert(data, reference, jobToken, start, priced) {
   if (isAgent) lines.push("Access: " + accessEmailText(data));
   if (data.referralCode) lines.push("Referral/offer code: " + data.referralCode);
   if (data.agencyId) lines.push("Agent's reference: " + data.agencyId);
+  if (data.notes) lines.push("Notes: " + data.notes);
+  if (data.cancellation) lines.push("Early start request: " + earlyStartRecord_(data.cancellation));
+  if (data.cancellation && data.cancellation.within && !data.cancellation.earlyStart) {
+    lines.push("", "NOTE: this clean is within their 14-day cancellation period, but they didn't tick the box asking us to start early (the page may have been open from before it was added). " +
+      "As it stands they could cancel up to " + data.cancellation.deadline + " and pay nothing for work done. Worth asking them to confirm by message that they want it done early.");
+  }
   if (priced && priced.adjusted) lines.push("", "NOTE: the page showed " + priced.pageTotal + " but the price list gives " + data.total + ". Booked at " + data.total + ".");
   if (data.areaUnchecked) lines.push("", "NOTE: the service area list couldn't be read, so the postcode wasn't checked. Worth a quick look at where this is.");
   if (priced && priced.verified === false) lines.push("", "NOTE: the price list couldn't be checked, so this was booked at the price the page sent. Worth a quick check.");

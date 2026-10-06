@@ -53,8 +53,11 @@ function serve(dir) {
 
 // Opens a page with the booking system faked. The first request for times
 // fails, to check the Try again button. Bookings get the queued replies.
-async function openPage(browser, url, contextOptions) {
+// The page's clock is fixed at 1 Oct 2026 (or `now`), so the fake times on
+// 5 and 6 Oct are inside the 14-day cancellation period.
+async function openPage(browser, url, contextOptions, now) {
   const context = await browser.newContext(contextOptions);
+  await context.clock.setFixedTime(new Date(now || "2026-10-01T09:00:00Z"));
   await context.addInitScript(() => {
     try { localStorage.setItem("ecCookieConsent", JSON.stringify({ v: "denied", t: Date.now() })); } catch (e) {}
   });
@@ -118,10 +121,18 @@ async function bookingPage(browser, base, file) {
     await page.check('input[name="bf-access"][value="arrange"]');
     check("agent page: arranging access hides the site contact boxes", await page.$eval("#bf-site-contact", (el) => el.style.display === "none"));
   }
+  check("terms link by Confirm", (await page.$$('.bf-terms a[href="terms.html"]')).length === 1);
+  if (!agents) {
+    check("a time within 14 days shows the early-start box", await page.isVisible("#bf-early-start"));
+    check("Confirm waits for the early-start box", await confirmOff());
+    await page.check("#bf-early-start");
+  } else {
+    check("agent page: no early-start box", (await page.$("#bf-early-start")) === null);
+  }
   check("Confirm switches on once everything is filled in", !(await confirmOff()));
   if (agents) {
     await page.fill("#bf-business", "");
-    check("agent page: Confirm goes off without a business name", await confirmOff());
+    check("agent page: business name is optional (private landlords)", !(await confirmOff()));
     await page.fill("#bf-business", "Acme Lettings");
   }
 
@@ -149,6 +160,8 @@ async function bookingPage(browser, base, file) {
   if (!agents) {
     await page.check('input[name="bf-payment"][value="Bank transfer"]');
     await page.fill("#bf-referral", "FRIEND10");
+    await page.check('input[name="bf-parking"][value="Permit zone, visitor permit provided"]');
+    await page.fill("#bf-notes", "Dog in the kitchen.\nStain by the sofa.");
   } else {
     await page.fill("#bf-agency-id", "REF-9");
   }
@@ -161,13 +174,16 @@ async function bookingPage(browser, base, file) {
   check("booking sends the chosen time", sent.startTime === "2026-10-06T08:00:00Z" && sent.slotLabel === "Tue 6 Oct, 9:00am", [sent.startTime, sent.slotLabel]);
   check("booking sends the basket for re-pricing", JSON.stringify(sent.lineItems) === JSON.stringify([{ item: "Small room", qty: 2 }, { item: "Armchair", qty: 1 }]), sent.lineItems);
   check("booking sends the full address with postcode", sent.address === "1 High Street, BA1 1AA" && sent.postcode === "BA1 1AA");
+  if (agents) check("parking and notes are optional", sent.parking === "" && sent.notes === "", [sent.parking, sent.notes]);
+  else check("booking sends the parking answer and notes", sent.parking === "Permit zone, visitor permit provided" && sent.notes === "Dog in the kitchen.\nStain by the sofa.", [sent.parking, sent.notes]);
   if (agents) {
     check("agent booking: channel and invoice payment", sent.channel === "Agent/Landlord" && sent.payment === "Invoice, 14 days");
     check("agent booking: business, account reference and arranged access", sent.businessName === "Acme Lettings" && sent.agencyId === "REF-9" && sent.accessArrange === true && sent.siteContactName === "" && sent.siteContactPhone === "");
-    check("agent booking: no homeowner-only fields", !("referralCode" in sent));
+    check("agent booking: no homeowner-only fields", !("referralCode" in sent) && !("earlyStart" in sent));
   } else {
     check("homeowner booking: channel and chosen payment", sent.channel === "Consumer" && sent.payment === "Bank transfer");
     check("homeowner booking: referral code, no agent-only fields", sent.referralCode === "FRIEND10" && !("businessName" in sent) && !("accessArrange" in sent));
+    check("homeowner booking: sends the early-start request", sent.earlyStart === true, sent.earlyStart);
   }
   check("no JavaScript errors", fake.errors.length === 0, fake.errors);
   await context.close();
@@ -219,9 +235,11 @@ async function accessibility(browser, base, file) {
   await page.keyboard.press("Enter");
   const time = await focused();
   check("picking a time keeps focus on that time", time.cls.includes("bf-slot-btn") && time.pressed === "true", time);
+  if (!agents) check("the early-start box is read out when it appears", await waitToHear("14-day cancellation period"), await spoken());
 
   const legends = await page.$$eval("fieldset > legend", (els) => els.map((e) => e.textContent.trim()));
-  const expected = agents ? ["Access on the day", "Choose a time"] : ["How would you like to pay?", "Choose a time"];
+  const parking = "Is there parking, or a visitor permit? (optional)";
+  const expected = agents ? ["Access on the day", parking, "Choose a time"] : [parking, "How would you like to pay?", "Choose a time"];
   check("choice groups have a fieldset and legend", JSON.stringify(legends) === JSON.stringify(expected), legends);
 
   await page.fill("#bf-name", "Test Person");
@@ -233,6 +251,7 @@ async function accessibility(browser, base, file) {
   await page.fill("#bf-postcode", "SW1A 1AA");
   check("out-of-area note is read out", await waitToHear("We don’t take online bookings"), await spoken());
   await page.fill("#bf-postcode", "BA1 1AA");
+  if (!agents) await page.check("#bf-early-start");
 
   fake.replies.push({ ok: false, error: "something_else" });
   await page.click("#bf-submit");
@@ -254,6 +273,28 @@ async function accessibility(browser, base, file) {
   await still.context.close();
 }
 
+// A clean after the 14-day cancellation period needs no early-start box.
+async function laterClean(browser, base) {
+  console.log("\n== index.html (clean after 14 days)");
+  const { page, fake, context } = await openPage(browser, base + "index.html", undefined, "2026-09-01T09:00:00Z");
+  await page.click('#group-rooms .item-row:nth-child(1) button[data-action="inc"]');
+  await page.click("#bf-slots-retry");
+  await page.waitForSelector(".bf-day-card");
+  await page.click(".bf-slot-btn >> nth=0");
+  await page.fill("#bf-name", "Test Person");
+  await page.fill("#bf-phone", "07000 000000");
+  await page.fill("#bf-email", "test@example.com");
+  await page.fill("#bf-address", "1 High Street");
+  await page.fill("#bf-postcode", "BA1 1AA");
+  check("no early-start box for a clean after 14 days", !(await page.isVisible("#bf-early-start")));
+  check("Confirm switches on without it", !(await page.$eval("#bf-submit", (b) => b.disabled)));
+  fake.replies.push({ ok: true, reference: "EC-TEST3" });
+  await page.click("#bf-submit");
+  await page.waitForSelector("#booking-confirmed .ref");
+  check("booking says no early start was asked for", fake.bookings[fake.bookings.length - 1].earlyStart === false);
+  await context.close();
+}
+
 (async () => {
   if (!fs.existsSync(path.join(siteDir, "index.html"))) {
     console.error("No built site at " + siteDir + ". Run `jekyll build` first.");
@@ -265,6 +306,7 @@ async function accessibility(browser, base, file) {
   try {
     await bookingPage(browser, base, "index.html");
     await bookingPage(browser, base, "agents.html");
+    await laterClean(browser, base);
     await accessibility(browser, base, "index.html");
     await accessibility(browser, base, "agents.html");
   } finally {
