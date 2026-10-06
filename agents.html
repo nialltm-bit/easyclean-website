@@ -14,20 +14,20 @@ layout: null
 <script src="consent.js" defer></script>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EasyClean Somerset | For Landlords &amp; Letting Agents</title>
-<meta name="description" content="Fixed-price carpet, upholstery &amp; mattress cleaning for end-of-tenancy turnovers across Somerset, Bath &amp; Bristol. Book online, no site visit needed.">
+<title>End-of-Tenancy Carpet Cleaning in Bath &amp; Bristol | EasyClean Somerset</title>
+<meta name="description" content="Fixed-price carpet, upholstery &amp; mattress cleaning for end-of-tenancy turnovers across Bath, Bristol &amp; mid Somerset. Book online, no site visit needed.">
 <link rel="canonical" href="https://easycleansomerset.co.uk/agents.html">
 
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://easycleansomerset.co.uk/agents.html">
-<meta property="og:title" content="EasyClean Somerset | For Landlords &amp; Letting Agents">
-<meta property="og:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning for end-of-tenancy turnovers across Somerset, Bath &amp; Bristol. Book online, no site visit needed.">
+<meta property="og:title" content="End-of-Tenancy Carpet Cleaning in Bath &amp; Bristol | EasyClean Somerset">
+<meta property="og:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning for end-of-tenancy turnovers across Bath, Bristol &amp; mid Somerset. Book online, no site visit needed.">
 <meta property="og:image" content="https://easycleansomerset.co.uk/og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="EasyClean Somerset | For Landlords &amp; Letting Agents">
-<meta name="twitter:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning for end-of-tenancy turnovers across Somerset, Bath &amp; Bristol.">
+<meta name="twitter:title" content="End-of-Tenancy Carpet Cleaning in Bath &amp; Bristol | EasyClean Somerset">
+<meta name="twitter:description" content="Fixed-price carpet, upholstery &amp; mattress cleaning for end-of-tenancy turnovers across Bath, Bristol &amp; mid Somerset.">
 <meta name="twitter:image" content="https://easycleansomerset.co.uk/og-image.png">
 
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
@@ -38,28 +38,7 @@ layout: null
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 
-<script type="application/ld+json">
-{
-  "@context": "https://schema.org",
-  "@type": "LocalBusiness",
-  "name": "EasyClean Somerset",
-  "description": "Fixed-price carpet, upholstery and mattress cleaning across Somerset, Bath & Bristol. Instant online booking, no home visit needed.",
-  "url": "https://easycleansomerset.co.uk/",
-  "telephone": "+447873212249",
-  "email": "easycleansomerset@gmail.com",
-  "image": "https://easycleansomerset.co.uk/og-image.png",
-  "priceRange": "££",
-  "areaServed": [
-    "Somerset", "Bath and North East Somerset", "Bristol",
-    "Midsomer Norton", "Radstock", "Frome", "Bath", "Keynsham",
-    "Wells", "Shepton Mallet", "Glastonbury", "Street", "Cheddar",
-    "Paulton", "Timsbury", "Peasedown St John"
-  ],
-  "sameAs": [
-    "https://uk.trustpilot.com/review/easycleansomerset.co.uk"
-  ]
-}
-</script>
+{% include business-schema.html %}
 <style>
   /* ============ TOKENS ============ */
   /* Colours inverted relative to index.html/terms.html on purpose, so this
@@ -262,6 +241,7 @@ layout: null
      header, so the hero CTA stays above the fold on a 375x667 phone. */
   @media (max-width: 480px) { .hero { padding: 18px 0 40px; } }
   .hero h1 { font-size: clamp(40px, 6.4vw, 78px); }
+  .hero h1 .eyebrow { line-height: 1.6; text-wrap: wrap; }
   .hero h1 em {
     font-style: normal;
     color: var(--teal);
@@ -285,6 +265,15 @@ layout: null
   }
   .hero-list li:last-child { margin-bottom: 0; }
   .hero-ctas { display: flex; gap: 14px; margin-top: 32px; flex-wrap: wrap; }
+  /* On phones the button goes straight under the heading, so it's on screen
+     without scrolling and clear of the cookie notice. It's the only thing in
+     the hero you can tab to, so the keyboard order doesn't change. */
+  @media (max-width: 480px) {
+    .hero-grid { display: flex; flex-direction: column; }
+    .hero-ctas { order: 1; margin-top: 20px; }
+    .hero-list { order: 2; margin-top: 24px; }
+    .hero-note { order: 3; }
+  }
   .hero-note {
     margin-top: 22px;
     font-size: 13.5px;
@@ -771,14 +760,13 @@ layout: null
   .hours-grid {
     margin-top: 34px;
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(2, 1fr);
     gap: 1px;
     background: var(--line);
     border: 1px solid var(--line);
     border-radius: 4px;
     overflow: hidden;
   }
-  @media (max-width: 700px) { .hours-grid { grid-template-columns: repeat(2, 1fr); } }
   .hours-cell { background: var(--surface); padding: 16px; }
   .hours-cell .d { font-family: "Public Sans", sans-serif; font-weight: 600; font-size: 12.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--slate); }
   .hours-cell .t { font-weight: 700; margin-top: 4px; font-size: 15px; }
@@ -820,6 +808,50 @@ layout: null
     font-size: 12.5px;
     color: color-mix(in srgb, var(--on-ink) 65%, transparent);
   }
+  /* ============ AREA AND VAT NOTES ============ */
+  .area-line { margin: 12px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink-soft); max-width: 75ch; }
+  .area-line:empty { display: none; }
+  .area-note { margin: 16px 0 0; font-size: 14.5px; color: var(--ink-soft); }
+  .summary-vat { margin-top: 6px; font-size: 12.5px; color: color-mix(in srgb, var(--on-ink) 65%, transparent); }
+
+  /* ============ STICKY HEADER CLEARANCE ============ */
+  /* Links that jump down the page stop this far from the top, so the sticky
+     header doesn't cover what they jump to. The header is taller when its
+     links wrap: 103px up to about 1000px wide, 123px on phones. */
+  #prices, #book { scroll-margin-top: 90px; }
+  @media (max-width: 1000px) {
+    #prices, #book, .item-group, .seal, .booking-confirmed { scroll-margin-top: 112px; }
+  }
+  @media (max-width: 460px) {
+    #prices, #book, .item-group, .seal, .booking-confirmed { scroll-margin-top: 132px; }
+  }
+
+  /* ============ PHONE BASKET BAR ============ */
+  /* Phones and small tablets only, where the basket sits below the price
+     list. booking.js shows it once something's in the basket, and hides it
+     while the basket or the booking form is on screen. */
+  .basket-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+    background: var(--ink);
+    color: var(--on-ink);
+    box-shadow: 0 -4px 16px rgba(0,0,0,.18);
+    font-weight: 700;
+    font-size: 15px;
+  }
+  .basket-bar[hidden] { display: none; }
+  .basket-bar .btn { padding: 12px 18px; font-size: 15px; }
+  @media (min-width: 901px) { .basket-bar { display: none; } }
+  @media (max-width: 900px) { body.has-basket-bar { padding-bottom: 72px; } }
+
   /* ============ SKIP LINK ============ */
   /* The first thing a keyboard user reaches: jumps past the header to the
      page's main content. Off-screen until it has focus. */
@@ -843,7 +875,7 @@ layout: null
 <a class="skip-link" href="#main">Skip to main content</a>
 
 <nav class="audience-bar" aria-label="Other booking page">
-  <div class="audience-bar-inner">Homeowner or tenant?<a href="index.html">Book here</a></div>
+  <div class="audience-bar-inner">Homeowner or tenant?<a href="/">Book here</a></div>
 </nav>
 
 <header class="site">
@@ -863,8 +895,7 @@ layout: null
   <!-- ============ HERO ============ -->
   <section class="hero">
     <div class="wrap hero-grid">
-      <div class="eyebrow">Somerset, Bath &amp; Bristol · Carpet, upholstery &amp; mattress cleaning for landlords &amp; letting agents</div>
-      <h1>Click.<br>Book.<br><em>Clean.</em></h1>
+      <h1><span class="eyebrow">Bath, Bristol &amp; mid Somerset · Carpet, upholstery &amp; mattress cleaning for landlords &amp; letting agents</span>Click.<br>Book.<br><em>Clean.</em></h1>
       <ul class="hero-list">
         <li>Fixed price for carpet, upholstery &amp; mattress cleaning at end-of-tenancy turnovers, see it before you book</li>
         <li>Book a slot online in 60 seconds, no site visit needed</li>
@@ -873,7 +904,7 @@ layout: null
       <div class="hero-ctas">
         <a href="#prices" class="btn btn-primary">Select your items</a>
       </div>
-      <div class="hero-note"><span class="dot"></span> Serving Midsomer Norton, Radstock, Frome, Bath, Bristol &amp; the Somerset villages</div>
+      <div class="hero-note"><span class="dot"></span> Serving Midsomer Norton, Radstock, Bath, Frome, Wells, Keynsham, Bristol &amp; nearby villages</div>
     </div>
   </section>
 
@@ -923,7 +954,7 @@ layout: null
           <p>Same-day response.</p>
           <ul>
             <li>Send us a couple of photos over WhatsApp</li>
-            <li>No WhatsApp? We&#8217;ll take it by text instead</li>
+            <li>No WhatsApp? Text us on <a href="sms:+447873212249">07873 212249</a> instead</li>
             <li>Same-day response with a firm price</li>
           </ul>
           <a id="wa-quick-quote" href="#" target="_blank" rel="noopener" class="btn btn-wa">Quick Quote on WhatsApp</a>
@@ -938,6 +969,7 @@ layout: null
     <div class="wrap">
       <div class="eyebrow">Select your items</div>
       <h2 style="text-transform:none; font-size:clamp(28px,3.6vw,40px); font-weight:700;">Select your items.</h2>
+      <p class="area-line" id="area-line"></p>
 
       <div class="calc-grid">
         <div>
@@ -998,6 +1030,7 @@ layout: null
             <span class="lab">Total</span>
             <span class="amt mono" id="summary-total">£0</span>
           </div>
+          <div class="summary-vat">No VAT to add.</div>
           <div class="summary-time" id="summary-time" style="display:none;">
             <span class="lab">Est. job time</span>
             <span class="val" id="summary-time-val">-</span>
@@ -1091,25 +1124,27 @@ layout: null
   <section>
     <div class="wrap">
       <div class="eyebrow">Where &amp; when</div>
-      <h2 style="text-transform:none; font-size:clamp(28px,3.6vw,40px); font-weight:700;">Somerset, Bath &amp; Bristol, six days a week.</h2>
+      <h2 style="text-transform:none; font-size:clamp(28px,3.6vw,40px); font-weight:700;">Bath, Bristol &amp; mid Somerset, six days a week.</h2>
       <div class="area-list">
-        <span class="area-chip">Midsomer Norton</span>
-        <span class="area-chip">Radstock</span>
-        <span class="area-chip">Frome</span>
-        <span class="area-chip">Bath</span>
-        <span class="area-chip">Paulton</span>
-        <span class="area-chip">Timsbury</span>
-        <span class="area-chip">Peasedown St John</span>
-        <span class="area-chip">+ surrounding villages</span>
+{%- for t in site.data.business.towns %}
+        <span class="area-chip">{{ t }}</span>
+{%- endfor %}
       </div>
+      <p class="area-note">In Bristol we cover the centre, south and east. Not sure? Type your postcode when you book, or WhatsApp us.</p>
       <div class="hours-grid">
-        <div class="hours-cell"><div class="d">Mon–Fri</div><div class="t">Early &amp; evening slots</div></div>
-        <div class="hours-cell"><div class="d">Saturday</div><div class="t">Full day</div></div>
-        <div class="hours-cell"><div class="d">Sunday</div><div class="t">By arrangement</div></div>
-        <div class="hours-cell"><div class="d">Bank holidays</div><div class="t">By arrangement</div></div>
+{%- for h in site.data.business.hours %}
+        <div class="hours-cell"><div class="d">{{ h.days }}</div><div class="t">{{ h.time }}</div></div>
+{%- endfor %}
       </div>
     </div>
   </section>
+
+  <!-- ============ PHONE BASKET BAR ============ -->
+  <!-- Phones only. booking.js fills in the total and shows it. -->
+  <div class="basket-bar" id="basket-bar" hidden>
+    <span>Basket: <span class="mono" id="basket-bar-total">£0</span></span>
+    <a href="#book" class="btn btn-primary">Continue to booking</a>
+  </div>
 </main>
 
 <footer class="site">
@@ -1117,7 +1152,7 @@ layout: null
     <div class="foot-grid">
       <div>
         <div class="wordmark">Easy<span style="color:var(--teal-on-ink);">Clean</span> Somerset</div>
-        <p style="margin-top:14px; max-width:34ch;">Carpet, upholstery &amp; mattress cleaning across Somerset, Bath &amp; Bristol, fixed prices, booked online.</p>
+        <p style="margin-top:14px; max-width:34ch;">Carpet, upholstery &amp; mattress cleaning across Bath, Bristol &amp; mid Somerset, fixed prices, booked online.</p>
       </div>
       <div>
         <h2>Get a price</h2>
@@ -1125,16 +1160,21 @@ layout: null
         <p><a href="#book" class="book-link">Book online</a></p>
         <p><a id="foot-wa" href="#" target="_blank" rel="noopener">WhatsApp Quick Quote</a></p>
         <p><a href="faq.html">FAQs</a></p>
+        <p><a href="end-of-tenancy-cleaning.html">End-of-tenancy cleaning</a></p>
+        <p><a href="sofa-cleaning.html">Sofa cleaning</a></p>
+        <p><a href="mattress-cleaning.html">Mattress cleaning</a></p>
       </div>
       <div>
         <h2>Contact</h2>
         <p>WhatsApp: <a class="mono" href="https://wa.me/447873212249" target="_blank" rel="noopener">07873 212249</a></p>
-        <p><a href="mailto:easycleansomerset@gmail.com">easycleansomerset@gmail.com</a></p>
-        <p><a href="index.html">Booking for your own home instead?</a></p>
+        <p>Call: <a class="mono" href="tel:+447873212249">07873 212249</a></p>
+        <p>Text: <a class="mono" href="sms:+447873212249">07873 212249</a></p>
+        <p>Email: <a href="mailto:easycleansomerset@gmail.com">easycleansomerset@gmail.com</a></p>
+        <p><a href="/">Booking for your own home instead?</a></p>
       </div>
     </div>
     <div class="foot-bottom">
-      <span>© 2026 EasyClean Somerset. Sole trader.</span>
+      <span>© 2026 Niall Maher trading as EasyClean Somerset, Midsomer Norton. <a href="terms.html#business-details">Business details</a></span>
       <a href="privacy.html">Privacy &amp; cookies</a>
       <a href="#" data-cookie-settings>Cookie settings</a>
       <a href="terms.html">Terms &amp; Conditions</a>

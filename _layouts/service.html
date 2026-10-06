@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<!-- Analytics and Trustpilot only load after cookie consent: see consent.js.
+     gtag() calls before then just queue and are never sent without consent. -->
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+</script>
+<script src="consent.js" defer></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page.title | escape }}</title>
+<meta name="description" content="{{ page.description | escape }}">
+<link rel="canonical" href="https://easycleansomerset.co.uk{{ page.url }}">
+
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://easycleansomerset.co.uk{{ page.url }}">
+<meta property="og:title" content="{{ page.title | escape }}">
+<meta property="og:description" content="{{ page.description | escape }}">
+<meta property="og:image" content="https://easycleansomerset.co.uk/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ page.title | escape }}">
+<meta name="twitter:description" content="{{ page.description | escape }}">
+<meta name="twitter:image" content="https://easycleansomerset.co.uk/og-image.png">
+
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+{% include business-schema.html %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Service",
+  "name": {{ page.service_name | jsonify }},
+  "serviceType": {{ page.service_name | jsonify }},
+  "url": "https://easycleansomerset.co.uk{{ page.url }}",
+  "provider": { "@id": "https://easycleansomerset.co.uk/#business" },
+  "areaServed": {{ site.data.business.towns | jsonify }},
+  "offers": [
+    {%- assign first = true %}
+    {%- for p in site.data.prices %}{% if page.price_groups contains p.group %}
+    {% unless first %},{% endunless %}{ "@type": "Offer", "price": "{{ p.price }}", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": {{ p.google_name | jsonify }} } }
+    {%- assign first = false %}{% endif %}{% endfor %}
+  ]
+}
+</script>
+<style>
+  /* ============ TOKENS (kept identical to index.html) ============ */
+  :root {
+    --ink: #12232B;
+    --ink-soft: #2A3D46;
+    --paper: #F5F7F6;
+    --surface: #FFFFFF;
+    --teal: #0E7C86;
+    --teal-deep: #0A5960;
+    --teal-tint: #E4F0F0;
+    --slate: #5C6F73;
+    --line: #DCE3E2;
+    --stamp: #B5461E;
+    --stamp-tint: #FBEAE1;
+    --on-ink: #F5F7F6;
+    --shadow: 0 1px 2px rgba(18,35,43,0.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink: #E9EEEC;
+      --ink-soft: #C4D0CD;
+      --paper: #0D1A1F;
+      --surface: #15262C;
+      --teal: #3FB8C4;
+      --teal-deep: #6ED2DB;
+      --teal-tint: #143137;
+      --slate: #8FA3A2;
+      --line: #24383E;
+      --stamp: #E58256;
+      --stamp-tint: #2C1B14;
+      --on-ink: #0D1A1F;
+      --shadow: 0 1px 2px rgba(0,0,0,0.4);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #E9EEEC;
+    --ink-soft: #C4D0CD;
+    --paper: #0D1A1F;
+    --surface: #15262C;
+    --teal: #3FB8C4;
+    --teal-deep: #6ED2DB;
+    --teal-tint: #143137;
+    --slate: #8FA3A2;
+    --line: #24383E;
+    --stamp: #E58256;
+    --stamp-tint: #2C1B14;
+    --on-ink: #0D1A1F;
+    --shadow: 0 1px 2px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+
+  h1, h2, .display {
+    font-family: "Big Shoulders Display", system-ui, sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
+    line-height: 0.95;
+    text-wrap: balance;
+    margin: 0;
+    color: var(--ink);
+  }
+  a { color: var(--teal-deep); }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 0 24px; }
+
+  /* ============ NAV (identical to index.html) ============ */
+  header.site {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: color-mix(in srgb, var(--paper) 88%, transparent);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--line);
+  }
+  .navrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    max-width: 1120px;
+    margin: 0 auto;
+    gap: 16px;
+  }
+  .wordmark {
+    font-family: "Big Shoulders Display", sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    font-size: 25px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .wordmark span { color: var(--teal); }
+  a.wordmark-link { text-decoration: none; color: inherit; display: inline-block; }
+  a.wordmark-link:hover .wordmark { color: var(--teal-deep); }
+  nav.links { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  nav.links a { text-decoration: none; font-size: 14.5px; font-weight: 600; color: var(--ink-soft); }
+  nav.links a:hover { color: var(--teal-deep); }
+  nav.links a.btn-wa { color: var(--teal-deep); font-weight: 700; }
+  @media (max-width: 460px) {
+    .navrow { padding: 14px 16px; gap: 8px; flex-wrap: wrap; row-gap: 10px; }
+    .wordmark { font-size: 23px; }
+    nav.links { gap: 14px; }
+  }
+
+  /* ============ CONTENT ============ */
+  .tc-hero { padding: 56px 0 8px; }
+  .tc-hero .eyebrow {
+    font-family: "Public Sans", sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--teal-deep);
+    margin-bottom: 10px;
+  }
+  .tc-hero h1 { font-size: clamp(30px, 5vw, 44px); }
+  .tc-updated { color: var(--slate); font-size: 13.5px; margin-top: 14px; max-width: 56ch; }
+  .tc-body { padding: 24px 0 80px; }
+  .tc-body h2 {
+    font-family: "Public Sans", sans-serif;
+    font-weight: 700;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 19px;
+    color: var(--ink);
+    margin: 38px 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .tc-body h2:first-of-type { margin-top: 6px; }
+  .tc-body p { color: var(--ink-soft); margin: 0 0 14px; }
+
+  .cta-box {
+    margin-top: 44px;
+    padding: 24px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--surface);
+  }
+  .cta-box p { margin: 0 0 14px; }
+  .cta-box .btns { display: flex; gap: 10px; flex-wrap: wrap; }
+  .cta-box a.btn {
+    display: inline-block;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 14.5px;
+    padding: 12px 18px;
+    border-radius: 4px;
+  }
+  .btn-primary { background: var(--stamp); color: var(--on-ink); }
+  .btn-ghost { background: transparent; color: var(--ink-soft); border: 1px solid var(--line); }
+
+  /* ============ SERVICE PAGES ============ */
+  .tc-lead { color: var(--ink-soft); font-size: 18px; margin-top: 16px; max-width: 60ch; }
+  .tc-body ul { color: var(--ink-soft); padding-left: 22px; margin: 0 0 14px; }
+  .tc-body li { margin-bottom: 6px; }
+  .price-table { width: 100%; max-width: 560px; border-collapse: collapse; margin: 4px 0 10px; font-size: 15.5px; }
+  .price-table th { text-align: left; font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--slate); font-weight: 600; padding: 0 0 8px; border-bottom: 1px solid var(--line); }
+  .price-table td { padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--ink); vertical-align: top; }
+  .price-table .price { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; padding-left: 16px; }
+  .price-table .meta { display: block; font-size: 13.5px; color: var(--slate); }
+  .small-note { font-size: 14px; color: var(--slate); }
+
+  /* ============ FOOTER (identical to index.html) ============ */
+  footer.site { background: var(--ink); color: var(--on-ink); padding: 48px 0 30px; margin-top: 20px; }
+  footer.site p { color: color-mix(in srgb, var(--on-ink) 75%, transparent); font-size: 14.5px; margin: 0; }
+  footer.site a { color: var(--on-ink); }
+  .foot-bottom {
+    margin-top: 26px;
+    padding-top: 20px;
+    border-top: 1px solid color-mix(in srgb, var(--on-ink) 16%, transparent);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 12.5px;
+    color: color-mix(in srgb, var(--on-ink) 65%, transparent);
+  }
+  /* ============ SKIP LINK ============ */
+  /* The first thing a keyboard user reaches: jumps past the header to the
+     page's main content. Off-screen until it has focus. */
+  .skip-link {
+    position: absolute;
+    left: 12px;
+    top: -100px;
+    z-index: 200;
+    padding: 10px 16px;
+    border-radius: 4px;
+    background: var(--ink);
+    color: var(--on-ink);
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .skip-link:focus { top: 12px; }
+  main:focus { outline: none; }
+</style>
+</head>
+<body>
+<!-- Layout for the service pages (end-of-tenancy, sofa, mattress). Each
+     page sets its title, intro and price groups in its front matter; the
+     prices come from _data/prices.yml and the towns from _data/business.yml. -->
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<header class="site">
+  <div class="navrow">
+    <a href="/" class="wordmark-link" aria-label="EasyClean Somerset home"><span class="wordmark">Easy<span>Clean</span> Somerset</span></a>
+    <nav class="links">
+      <a href="/">Home</a>
+      <a href="agents.html">Landlords &amp; agents</a>
+      <a id="nav-wa" href="#" target="_blank" rel="noopener" class="btn-wa">WhatsApp us</a>
+      <a href="/#prices">Book online</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+  <div class="wrap tc-hero">
+    <div class="eyebrow">{{ page.eyebrow | escape }}</div>
+    <h1>{{ page.h1 | escape }}</h1>
+    <p class="tc-lead">{{ page.lead | escape }}</p>
+  </div>
+
+  <div class="wrap tc-body">
+{{ content }}
+    <div class="cta-box">
+      <p>See the full price list, add what you need and book a time online. Questions first? Message us.</p>
+      <div class="btns">
+        <a href="{{ page.book_link }}" class="btn btn-primary">See prices and book</a>
+        <a href="#" class="btn btn-ghost" data-wa>WhatsApp us</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <p><a href="/">&larr; Back to EasyClean Somerset</a></p>
+    <div class="foot-bottom">
+      <span>© 2026 Niall Maher trading as EasyClean Somerset, Midsomer Norton. <a href="terms.html#business-details">Business details</a></span>
+      <a href="privacy.html">Privacy &amp; cookies</a>
+      <a href="#" data-cookie-settings>Cookie settings</a>
+      <a href="terms.html">Terms &amp; Conditions</a>
+      <a href="mailto:easycleansomerset@gmail.com">easycleansomerset@gmail.com</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  var WHATSAPP_NUMBER = "447873212249";
+  function waLink(message) {
+    return "https://wa.me/" + WHATSAPP_NUMBER + "?text=" + encodeURIComponent(message);
+  }
+  var message = {{ page.wa_message | jsonify }};
+  document.getElementById("nav-wa").href = waLink(message);
+  document.querySelectorAll("[data-wa]").forEach(function (a) {
+    a.href = waLink(message);
+    a.target = "_blank";
+    a.rel = "noopener";
+  });
+</script>
+</body>
+</html>

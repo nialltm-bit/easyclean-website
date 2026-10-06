@@ -1,0 +1,47 @@
+# EasyClean Somerset: business details used across the website.
+#
+# Keep these the same as the Google Business Profile. When GitHub builds
+# the site it writes them into the "Where & when" section of the homepage
+# and the landlord and agent page, and into the business details Google
+# reads (the structured data on the homepage, agent page, FAQ and service
+# pages). Change them here and nowhere else.
+#
+# These are only the details shown on the website. The postcodes we take
+# online bookings in are in service-area.js, and the times we offer online
+# are set in the booking system.
+
+# Service area: the towns listed on the Google Business Profile, in order.
+towns:
+  - Midsomer Norton
+  - Radstock
+  - Paulton
+  - Peasedown St John
+  - Timsbury
+  - Bath
+  - Keynsham
+  - Chew Magna
+  - Frome
+  - Shepton Mallet
+  - Wells
+  - Glastonbury
+  - Street
+  - Cheddar
+  - Wedmore
+  - Castle Cary
+  - Bruton
+  - Bristol
+  - Long Ashton
+  - Kingswood
+
+# Opening hours, as shown on the page.
+hours:
+  - days: "Monday to Saturday"
+    time: "8am to 8pm"
+  - days: "Sunday"
+    time: "Closed"
+
+# The same opening hours, in the 24-hour form Google reads.
+opening_hours:
+  - days: [Monday, Tuesday, Wednesday, Thursday, Friday, Saturday]
+    opens: "08:00"
+    closes: "20:00"

@@ -132,7 +132,10 @@
       ".ec-consent-btn{font-family:inherit;font-weight:700;font-size:15px;padding:11px 20px;border-radius:4px;cursor:pointer;" +
         "background:var(--surface,#fff);color:var(--ink,#12232B);border:1.5px solid var(--ink,#12232B);min-width:96px;}" +
       ".ec-consent-btn:hover{background:var(--ink,#12232B);color:var(--surface,#fff);}" +
-      "@media (max-width:480px){.ec-consent-actions{width:100%}.ec-consent-btn{flex:1}}";
+      "@media (max-width:480px){.ec-consent{left:8px;right:8px;bottom:8px;}" +
+        ".ec-consent-inner{gap:8px;padding:8px 12px;}" +
+        ".ec-consent-text{flex-basis:100%;font-size:13px;line-height:1.4;}" +
+        ".ec-consent-actions{width:100%}.ec-consent-btn{flex:1;padding:9px 14px;font-size:14px;}}";
     var s = document.createElement("style");
     s.textContent = css;
     document.head.appendChild(s);

@@ -1,0 +1,45 @@
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "LocalBusiness",
+  "@id": "https://easycleansomerset.co.uk/#business",
+  "name": "EasyClean Somerset",
+  "description": "Fixed-price carpet, upholstery and mattress cleaning in Bath, Bristol and mid Somerset. Instant online booking, no home visit needed.",
+  "url": "https://easycleansomerset.co.uk/",
+  "telephone": "+447873212249",
+  "email": "easycleansomerset@gmail.com",
+  "image": "https://easycleansomerset.co.uk/og-image.png",
+  "logo": "https://easycleansomerset.co.uk/apple-touch-icon.png",
+  "priceRange": "££",
+  "paymentAccepted": "Cash, Bank transfer",
+  "currenciesAccepted": "GBP",
+  "address": {
+    "@type": "PostalAddress",
+    "addressLocality": "Midsomer Norton",
+    "addressRegion": "Somerset",
+    "postalCode": "BA3",
+    "addressCountry": "GB"
+  },
+  "geo": { "@type": "GeoCoordinates", "latitude": 51.28, "longitude": -2.48 },
+  "openingHoursSpecification": [
+    {%- for h in site.data.business.opening_hours %}
+    { "@type": "OpeningHoursSpecification", "dayOfWeek": {{ h.days | jsonify }}, "opens": {{ h.opens | jsonify }}, "closes": {{ h.closes | jsonify }} }{% unless forloop.last %},{% endunless %}
+    {%- endfor %}
+  ],
+  "areaServed": {{ site.data.business.towns | jsonify }},
+  "sameAs": [
+    "https://uk.trustpilot.com/review/easycleansomerset.co.uk"
+  ]
+  {%- if include.offers %},
+  "hasOfferCatalog": {
+    "@type": "OfferCatalog",
+    "name": "Carpet, upholstery, mattress and rug cleaning",
+    "itemListElement": [
+      {%- for p in site.data.prices %}
+      { "@type": "Offer", "price": "{{ p.price }}", "priceCurrency": "GBP", "itemOffered": { "@type": "Service", "name": {{ p.google_name | jsonify }} } }{% unless forloop.last %},{% endunless %}
+      {%- endfor %}
+    ]
+  }
+  {%- endif %}
+}
+</script>
