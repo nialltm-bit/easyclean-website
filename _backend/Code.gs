@@ -296,6 +296,37 @@ function escHtml(s) {
   });
 }
 
+// ---- Trader details on customer emails ----
+// The E-Commerce Regulations 2002 ask for the trader's name, address and
+// email on business emails. Same as the website footer: name and town, with
+// the full address on the terms page.
+var TRADER_EMAIL = "easycleansomerset@gmail.com";
+var TRADER_DETAILS_URL = SITE_URL + "/terms.html#business-details";
+
+function traderLine_() {
+  return BUSINESS_NAME + " trading as EasyClean Somerset, Midsomer Norton";
+}
+
+// Added under the card in every customer email's HTML.
+function traderHtml_() {
+  var SANS = "Arial,Helvetica,sans-serif", SLATE = "#5C6F73", TEAL_DEEP = "#0A5960";
+  var link = function (href, text) {
+    return '<a href="' + href + '" style="color:' + TEAL_DEEP + ';font-weight:700;text-decoration:none;">' + text + '</a>';
+  };
+  return '<p style="max-width:560px;margin:14px auto 0;font-family:' + SANS + ';font-size:12px;line-height:1.6;color:' + SLATE + ';text-align:center;">' +
+    escHtml(traderLine_()) + '<br>' +
+    link(TRADER_DETAILS_URL, 'Business details') + ' &middot; ' + link('mailto:' + TRADER_EMAIL, TRADER_EMAIL) +
+  '</p>';
+}
+
+// Every email to a customer goes out through here, so the plain-text
+// version ends with the trader details too. The HTML builders add
+// traderHtml_() themselves.
+function sendCustomerEmail_(to, subject, textBody, opts) {
+  GmailApp.sendEmail(to, subject, textBody +
+    "\n\n--\n" + traderLine_() + "\nBusiness details: " + TRADER_DETAILS_URL + "\nEmail: " + TRADER_EMAIL, opts);
+}
+
 // Speed fix #2: the previous fix (one calendar lookup for the whole window,
 // instead of one per candidate slot) cut the calendar work down a lot, but
 // "Choose a time" was still slow — because that one remaining
@@ -857,7 +888,7 @@ function sendBookingConfirmation_(data, reference, slotLabel) {
     access: data.channel === "Agent/Landlord" ? accessEmailText(data) : ""
   });
 
-  GmailApp.sendEmail(data.email, "Booking confirmed: " + slotLabel, textBody, {
+  sendCustomerEmail_(data.email, "Booking confirmed: " + slotLabel, textBody, {
     htmlBody: htmlBody,
     name: "EasyClean Somerset"
   });
@@ -992,7 +1023,7 @@ function buildConfirmationEmailHtml(d) {
         // Footer
         '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:24px 28px;text-align:center;">' +
           '<div style="font-family:' + SANS + ';font-weight:800;font-size:13px;letter-spacing:0.02em;text-transform:uppercase;color:' + INK_SOFT + ';margin-bottom:6px;">EasyClean Somerset</div>' +
-          '<p style="margin:0 0 10px;font-family:' + SANS + ';font-size:12px;line-height:1.6;color:' + SLATE + ';">Carpet, upholstery &amp; mattress cleaning across Somerset &amp; BANES</p>' +
+          '<p style="margin:0 0 10px;font-family:' + SANS + ';font-size:12px;line-height:1.6;color:' + SLATE + ';">Carpet, upholstery &amp; mattress cleaning across Bath, Bristol &amp; mid Somerset</p>' +
           '<a href="https://easycleansomerset.co.uk" style="font-family:' + SANS + ';font-size:12px;font-weight:700;color:' + TEAL_DEEP + ';text-decoration:none;">easycleansomerset.co.uk</a>' +
           '<span style="font-family:' + SANS + ';font-size:12px;color:' + LINE + ';padding:0 8px;">&middot;</span>' +
           '<a href="https://easycleansomerset.co.uk/terms.html" style="font-family:' + SANS + ';font-size:12px;font-weight:700;color:' + TEAL_DEEP + ';text-decoration:none;">Terms &amp; Conditions</a>' +
@@ -1002,6 +1033,7 @@ function buildConfirmationEmailHtml(d) {
         '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
 
       '</table>' +
+      traderHtml_() +
     '</div>'
   );
 }
@@ -1124,7 +1156,7 @@ function sendDayBeforeEmail(v, start) {
     "Getting ready: clear small items off the floor, keep pets in another room, and clear a path from the door. A plug socket and water tap nearby helps." +
     (String(v.Items).indexOf("Mattress") !== -1 ? " Please strip the bedding beforehand." : "") +
     "\n\nNeed to change anything? Reply to this email or WhatsApp us: " + waLink + "\n\nSee you tomorrow,\nEasyClean Somerset";
-  GmailApp.sendEmail(v.Email, "Reminder: we're cleaning for you tomorrow", textBody, {
+  sendCustomerEmail_(v.Email, "Reminder: we're cleaning for you tomorrow", textBody, {
     htmlBody: buildReminderEmailHtml({
       dayBefore: true, accessNudge: accessNudge,
       name: name, slotLabel: when, items: v.Items, total: v.Total, payment: v["Payment method"],
@@ -1149,7 +1181,7 @@ function sendReminderEmail(v, start) {
     "Need to change anything? Just reply to this email or WhatsApp us: " + waLink + "\n\n" +
     "See you soon,\nEasyClean Somerset";
 
-  GmailApp.sendEmail(v.Email, "Reminder: we're cleaning for you today", textBody, {
+  sendCustomerEmail_(v.Email, "Reminder: we're cleaning for you today", textBody, {
     htmlBody: buildReminderEmailHtml({
       name: v.Name,
       slotLabel: when,
@@ -1248,6 +1280,7 @@ function buildReminderEmailHtml(d) {
         '</td></tr>' +
         '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
       '</table>' +
+      traderHtml_() +
     '</div>'
   );
 }
@@ -1313,7 +1346,7 @@ function sendSigningLinkForRow(row) {
     link + "\n\n" +
     "Thanks,\nEasyClean Somerset";
 
-  GmailApp.sendEmail(v.Email, "Please confirm your clean is complete", textBody, {
+  sendCustomerEmail_(v.Email, "Please confirm your clean is complete", textBody, {
     htmlBody: buildSigningLinkEmailHtml({ name: customerName, link: link, reference: v.Reference }),
     name: "EasyClean Somerset"
   });
@@ -1357,6 +1390,7 @@ function buildSigningLinkEmailHtml(d) {
         '</td></tr>' +
         '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
       '</table>' +
+      traderHtml_() +
     '</div>'
   );
 }
@@ -1753,7 +1787,7 @@ function sendThankYouEmail(v, inv, attachments) {
   if (inv.accountsEmail && inv.accountsEmail.toLowerCase() !== String(v.Email).toLowerCase()) {
     opts.cc = inv.accountsEmail;
   }
-  GmailApp.sendEmail(v.Email, subject, textBody, opts);
+  sendCustomerEmail_(v.Email, subject, textBody, opts);
 }
 
 // A standalone, emailed record of the sign-off itself — reference, what
@@ -1908,7 +1942,7 @@ function sendFollowUpEmail_(v) {
     paras.map(function (p) { return p.text + (p.link ? " " + p.link.label + ": " + p.link.url : ""); }).join("\n\n") +
     (!isAgent && REVIEW_URL ? "\n" + REVIEW_URL : "") +
     "\n\nThanks,\nEasyClean Somerset";
-  GmailApp.sendEmail(v.Email, isAgent ? "Checking in: the clean at " + v.Address : "How's everything looking after your clean?", textBody, {
+  sendCustomerEmail_(v.Email, isAgent ? "Checking in: the clean at " + v.Address : "How's everything looking after your clean?", textBody, {
     htmlBody: buildSimpleEmailHtml({
       name: name, heading: isAgent ? "Checking in on the clean" : "How's it looking?", paragraphs: paras,
       button: !isAgent && REVIEW_URL ? { text: "Leave us a review", url: REVIEW_URL } : null
@@ -1967,6 +2001,7 @@ function buildThankYouEmailHtml(d) {
         '</td></tr>' +
         '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
       '</table>' +
+      traderHtml_() +
     '</div>'
   );
 }
@@ -2813,7 +2848,7 @@ function sendBookingUpdateEmail_(d, reference, start) {
     ". What: " + d.items + ". Total: " + d.total + " (" + d.payment + "). Where: " + d.address + "." +
     (isAgent ? " Access: " + accessEmailText(d) + "." : "") +
     " If anything looks wrong, just reply to this email or message us on WhatsApp.";
-  GmailApp.sendEmail(d.email, "Booking updated: " + fmtWhen(start) + " (" + reference + ")",
+  sendCustomerEmail_(d.email, "Booking updated: " + fmtWhen(start) + " (" + reference + ")",
     "Hi " + name + ",\n\n" + body + "\n\nThanks,\nEasyClean Somerset", {
       htmlBody: buildSimpleEmailHtml({ name: name, heading: "Your booking has been updated", body: body }),
       name: "EasyClean Somerset"
@@ -2936,7 +2971,7 @@ function sendPaymentReminderEmail(v) {
       if (agency.accountsEmail && agency.accountsEmail.toLowerCase() !== String(v.Email).toLowerCase()) opts.cc = agency.accountsEmail;
     } catch (err) { /* reminder still goes to the booker */ }
   }
-  GmailApp.sendEmail(v.Email, "Payment reminder: " + invoiceNo + " (" + amount + ")", "Hi " + name + ",\n\n" + body + "\n\nThanks,\nEasyClean Somerset", opts);
+  sendCustomerEmail_(v.Email, "Payment reminder: " + invoiceNo + " (" + amount + ")", "Hi " + name + ",\n\n" + body + "\n\nThanks,\nEasyClean Somerset", opts);
 }
 
 // The saved invoice PDF, re-attached to a reminder. Null if it can't be read.
@@ -3186,7 +3221,7 @@ function sendCancellationEmail(v, reason, whenStr, fee) {
     opts.cc = fee.inv.accountsEmail;
   }
   var subject = "Booking cancelled: " + v.Reference + (fee ? " (Invoice " + fee.inv.invoiceNo + ")" : "");
-  GmailApp.sendEmail(v.Email, subject, "Hi " + name + ",\n\n" + body + "\n\nThanks,\nEasyClean Somerset", opts);
+  sendCustomerEmail_(v.Email, subject, "Hi " + name + ",\n\n" + body + "\n\nThanks,\nEasyClean Somerset", opts);
 }
 
 function sendPaymentReceipt(v, paidOn) {
@@ -3206,7 +3241,7 @@ function sendPaymentReceipt(v, paidOn) {
       if (agency.accountsEmail && agency.accountsEmail.toLowerCase() !== String(v.Email).toLowerCase()) opts.cc = agency.accountsEmail;
     } catch (err) { /* receipt still goes to the booker */ }
   }
-  GmailApp.sendEmail(v.Email, "Payment received: " + invoiceNo, "Hi " + name + ",\n\n" + line + "\n\nThanks,\nEasyClean Somerset", opts);
+  sendCustomerEmail_(v.Email, "Payment received: " + invoiceNo, "Hi " + name + ",\n\n" + line + "\n\nThanks,\nEasyClean Somerset", opts);
 }
 
 // Same branded shell as the other customer emails, for short one-message
@@ -3244,6 +3279,7 @@ function buildSimpleEmailHtml(d) {
         '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:20px 28px;text-align:center;font-family:' + SANS + ';font-weight:800;font-size:12.5px;text-transform:uppercase;color:' + SLATE + ';">EasyClean Somerset</td></tr>' +
         '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
       '</table>' +
+      traderHtml_() +
     '</div>'
   );
 }

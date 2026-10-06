@@ -43,4 +43,10 @@ The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. I
 
 ## Last updated
 
-6 October 2026: morning health check and turned-away booking alerts (FRE-185), and aftercare plus a 2-day follow-up email (FRE-193). This matches Apps Script once that version is deployed.
+6 October 2026:
+
+- Morning health check and turned-away booking alerts (FRE-185).
+- Aftercare plus a 2-day follow-up email (FRE-193).
+- Trader details at the foot of every customer email: name and town, a link to the business details in the terms, and the email address (FRE-189). Customer emails go out through `sendCustomerEmail_`, which adds them to the plain-text version. The HTML builders add `traderHtml_()`.
+
+This matches Apps Script once that version is deployed.
