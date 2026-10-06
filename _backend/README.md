@@ -37,6 +37,10 @@ Check these before changing either side.
 - **Sign-off page:** `job-complete.html` uses `GET ?action=job&t=<token>` and `POST { action: "complete", ... }`.
 - **WhatsApp number:** `WHATSAPP_NUMBER` in Code.gs must match the one in `booking.js`.
 
+## Morning check
+
+The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. It emails Niall if anything needs a look, including problems noted since the last check, and sends a short "all fine" note on Mondays. Turned-away website bookings also email him straight away (at most one an hour). To run the check by hand, pick `checkBookingSystem` in the function dropdown and press Run.
+
 ## Last updated
 
-5 October 2026. This matches Apps Script once the 21-day booking window (FRE-207) is deployed.
+6 October 2026: morning health check and turned-away booking alerts (FRE-185), and aftercare plus a 2-day follow-up email (FRE-193). This matches Apps Script once that version is deployed.

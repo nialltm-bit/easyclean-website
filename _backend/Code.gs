@@ -243,7 +243,7 @@ function doGet(e) {
     }
     return jsonResponse({ ok: false, error: "unknown_action" });
   } catch (err) {
-    console.error("doGet failed: " + err);
+    noteProblem_("Website request failed", err);
     return jsonResponse({ ok: false, error: "server_error" });
   }
 }
@@ -257,17 +257,26 @@ function notAvailable() {
 // else (completing without a signature, sending signing links, marking
 // invoices paid) happens in the private admin app via google.script.run.
 function doPost(e) {
+  var data;
   try {
-    var data = JSON.parse(e.postData.contents);
+    data = JSON.parse(e.postData.contents);
+  } catch (parseErr) {
+    // Not something our own pages ever send (junk or a bot), so no alert.
+    return jsonResponse({ ok: false, error: "server_error" });
+  }
+  try {
     if (data.action === "book") {
-      return jsonResponse(createBooking(data));
+      var result = createBooking(data);
+      if (!result.ok) noteRefusedBooking_(data, result.error);
+      return jsonResponse(result);
     }
     if (data.action === "complete") {
       return jsonResponse(completeJobPublic(data));
     }
     return jsonResponse({ ok: false, error: "unknown_action" });
   } catch (err) {
-    console.error("doPost failed: " + err);
+    noteProblem_("Website booking or sign-off request failed", err);
+    if (data && data.action === "book") noteRefusedBooking_(data, "server_error");
     return jsonResponse({ ok: false, error: "server_error" });
   }
 }
@@ -743,7 +752,7 @@ function createBookingLocked_(data) {
   try {
     refreshSlotsCache();
   } catch (cacheErr) {
-    console.error("Cache refresh after booking failed: " + cacheErr);
+    noteProblem_("Refreshing available times after a booking failed", cacheErr);
   }
 
   try {
@@ -753,7 +762,7 @@ function createBookingLocked_(data) {
     // The calendar event is already created at this point, which is what
     // actually matters — a failed confirmation email shouldn't fail the
     // whole booking. Logged so it's visible in Apps Script's execution log.
-    console.error("Confirmation email failed: " + mailErr);
+    noteProblem_("Confirmation email failed", mailErr);
     notifyOwner("Confirmation email failed for " + reference,
       "The booking is in your calendar, but the customer's confirmation email didn't send (" + mailErr + "). " +
       "Their email was entered as: " + data.email + ". Worth checking it and contacting them directly.");
@@ -767,7 +776,7 @@ function createBookingLocked_(data) {
     // created, so a problem writing to the customer sheet should never fail
     // the booking itself. Logged so it's visible in Apps Script's execution
     // log if it ever needs investigating.
-    console.error("Customer sheet write failed: " + sheetErr);
+    noteProblem_("Writing a booking to the customer sheet failed", sheetErr);
     notifyOwner("Customer sheet not updated for " + reference,
       "The booking is in your calendar, but it couldn't be added to the customer sheet (" + sheetErr + "), " +
       "so it won't appear in the admin app. Add the row by hand from the calendar event.");
@@ -776,7 +785,7 @@ function createBookingLocked_(data) {
   try {
     sendNewBookingAlert(data, reference, jobToken, start, priced);
   } catch (alertErr) {
-    console.error("New booking alert failed: " + alertErr);
+    noteProblem_("New-booking alert to you failed", alertErr);
   }
 
   return { ok: true, reference: reference };
@@ -1033,16 +1042,24 @@ function bookingTimeText(v) {
 }
 
 function sendDayOfReminders() {
-  // Also runs the day-before reminders and, on Mondays, the unpaid digest,
-  // from this same daily trigger (no extra setup needed). Each part is
+  // The one daily trigger runs everything that happens each morning (no
+  // extra setup needed): day-before reminders, the Monday unpaid digest,
+  // today's reminders, the 2-day follow-ups, and last of all the health
+  // check, so it can report anything that failed this morning. Each part is
   // separate so one failing never stops the others.
-  try { sendDayBeforeReminders(); } catch (err) { console.error("Day-before reminders failed: " + err); }
+  try { sendDayBeforeReminders(); } catch (err) { noteProblem_("Day-before reminders failed", err); }
   try {
     if (Utilities.formatDate(new Date(), TIMEZONE, "u") === "1") sendUnpaidDigest();
-  } catch (err) { console.error("Unpaid digest failed: " + err); }
-  // Today's bookings, with their real start time from the calendar (so a
-  // job dragged to a new time shows the new time). Skips cancelled and
-  // completed ones, and anything already reminded today.
+  } catch (err) { noteProblem_("Unpaid invoices email failed", err); }
+  try { sendTodaysReminders_(); } catch (err) { noteProblem_("Morning reminders failed", err); }
+  try { sendFollowUps_(); } catch (err) { noteProblem_("2-day follow-up emails failed", err); }
+  try { dailyHealthCheck_(); } catch (err) { console.error("Health check failed: " + err); }
+}
+
+// Today's bookings, with their real start time from the calendar (so a
+// job dragged to a new time shows the new time). Skips cancelled and
+// completed ones, and anything already reminded today.
+function sendTodaysReminders_() {
   var sheet = null, header = null;
   getBookingReferencesForDay(new Date()).forEach(function (item) {
     try {
@@ -1056,7 +1073,7 @@ function sendDayOfReminders() {
       if (!sheet) { sheet = getCustomerSheet(); header = ensureColumns(sheet, ["Day-of reminder sent"]); }
       sheet.getRange(row.rowIndex, header.indexOf("Day-of reminder sent") + 1).setValue(new Date());
     } catch (err) {
-      console.error("Reminder failed for " + item.ref + ": " + err);
+      noteProblem_("Morning reminder failed for " + item.ref, err);
     }
   });
 }
@@ -1088,7 +1105,7 @@ function sendDayBeforeReminders() {
       if (!sheet) { sheet = getCustomerSheet(); header = ensureColumns(sheet, ["Day-before reminder sent"]); }
       sheet.getRange(row.rowIndex, header.indexOf("Day-before reminder sent") + 1).setValue(new Date());
     } catch (err) {
-      console.error("Day-before reminder failed for " + item.ref + ": " + err);
+      noteProblem_("Day-before reminder failed for " + item.ref, err);
     }
   });
 }
@@ -1389,7 +1406,7 @@ function completeJobLocked_(data) {
       // A signature that fails to save shouldn't stop the job being marked
       // done and the customer being thanked — logged so it's visible in the
       // execution log, but not fatal to the rest of this function.
-      console.error("Signature save failed for " + ref + ": " + err);
+      noteProblem_("Saving the signature failed for " + ref, err);
     }
   } else {
     // No-signature path (empty property, key left out, customer declined).
@@ -1410,14 +1427,14 @@ function completeJobLocked_(data) {
   try {
     invoiceBlob = buildInvoicePdfBlob(v, inv);
   } catch (err) {
-    console.error("Invoice PDF failed for " + ref + ": " + err);
+    noteProblem_("Invoice PDF failed for " + ref, err);
     notifyOwner("Invoice PDF failed for " + ref, "The job is marked complete, but its invoice PDF couldn't be created (" + err + "), so the customer's email went without it. Send the invoice by hand.");
   }
   if (data.signature) {
     try {
       completionBlob = buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, data.signature);
     } catch (err) {
-      console.error("Job completion PDF failed for " + ref + ": " + err);
+      noteProblem_("Job completion PDF failed for " + ref, err);
     }
   }
 
@@ -1430,7 +1447,7 @@ function completeJobLocked_(data) {
       invoiceUrl = saveDocumentToDrive(INVOICES_FOLDER_NAME, completedAt, invoiceBlob);
     } catch (err) {
       invoiceUrl = "Not saved to Drive (see execution log)";
-      console.error("Invoice Drive save failed for " + ref + ": " + err);
+      noteProblem_("Saving the invoice to Drive failed for " + ref, err);
       notifyOwner("Invoice not saved to Drive for " + ref, "The invoice was emailed, but the Drive copy failed (" + err + "). The emailed copy is in your Sent folder.");
     }
   }
@@ -1439,7 +1456,7 @@ function completeJobLocked_(data) {
       completionUrl = saveDocumentToDrive(COMPLETIONS_FOLDER_NAME, completedAt, completionBlob);
     } catch (err) {
       completionUrl = "Not saved to Drive (see execution log)";
-      console.error("Completion Drive save failed for " + ref + ": " + err);
+      noteProblem_("Saving the completion PDF to Drive failed for " + ref, err);
     }
   }
 
@@ -1469,7 +1486,7 @@ function completeJobLocked_(data) {
     // Same principle as everywhere else in this file: the job's already
     // recorded as done and invoiced above, which is what actually matters —
     // a failed email shouldn't undo that or fail this response.
-    console.error("Thank-you email failed for " + ref + ": " + err);
+    noteProblem_("Thank-you and invoice email failed for " + ref, err);
     notifyOwner("Invoice email failed for " + ref, "The job is marked complete and invoiced, but the email to the customer didn't send (" + err + "). Send them the invoice from the Drive copy.");
   }
 
@@ -1524,7 +1541,7 @@ function buildInvoiceContext(v, invoiceNumber, completedAt) {
       ctx.billToAddress = agency.billingAddress;
       ctx.accountsEmail = agency.accountsEmail;
     } catch (err) {
-      console.error("Agencies tab lookup failed for " + v.Reference + ": " + err);
+      noteProblem_("Agencies tab lookup failed for " + v.Reference, err);
     }
   }
   if (paymentDue) {
@@ -1711,12 +1728,14 @@ function sendThankYouEmail(v, inv, attachments) {
         ? "Invoice " + inv.invoiceNo + " for " + v.Total + " is attached, payment due by " + dueStr + ". Please use " + inv.invoiceNo + " as the payment reference."
         : "Invoice " + inv.invoiceNo + " is attached, paid in cash on the day.") +
       (attachments.length > 1 ? " The signed job completion confirmation is attached too." : "") +
+      "\n\n" + aftercareText_(aftercareFor_(v.Items, true)) +
       "\n\nThanks,\nEasyClean Somerset";
   } else {
     subject = "Thanks for booking with EasyClean Somerset (Invoice " + inv.invoiceNo + ")";
     textBody = "Hi " + greetingName + ",\n\n" +
       "All done, thanks for booking with EasyClean Somerset. Your invoice/receipt is attached.\n\n" +
       (inv.paymentDue ? "Payment of " + v.Total + " is due today by bank transfer. The bank details are on the invoice; please use " + inv.invoiceNo + " as the payment reference.\n\n" : "") +
+      aftercareText_(aftercareFor_(v.Items, false)) + "\n\n" +
       (REVIEW_URL ? "If you've got a minute, a review really helps a small business like ours: " + REVIEW_URL + "\n\n" : "") +
       "Thanks again,\nEasyClean Somerset";
   }
@@ -1725,7 +1744,8 @@ function sendThankYouEmail(v, inv, attachments) {
     htmlBody: buildThankYouEmailHtml({
       name: greetingName, reference: v.Reference, invoiceNo: inv.invoiceNo,
       isAgent: inv.isAgent, paymentDue: inv.paymentDue, dueStr: dueStr,
-      total: v.Total, address: v.Address, hasCompletion: attachments.length > 1
+      total: v.Total, address: v.Address, hasCompletion: attachments.length > 1,
+      aftercare: aftercareFor_(v.Items, inv.isAgent)
     }),
     attachments: attachments,
     name: "EasyClean Somerset"
@@ -1788,6 +1808,115 @@ function buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, signatureDataU
   return HtmlService.createHtmlOutput(html).getAs("application/pdf").setName("Job-completion-" + v.Reference + ".pdf");
 }
 
+// ---- Aftercare and the 2-day follow-up (FRE-193) ----
+// Terms section 8 says we give the drying time before leaving; the email
+// repeats the general advice so it's in writing. Change the wording here.
+var AFTERCARE_DRYING = "Carpets and upholstery are usually dry in 4 to 6 hours. It can take longer on cold or damp days, or for thick wool, and we'll have given you a time before we left.";
+
+// The aftercare advice for one job, from its items text.
+function aftercareFor_(items, isAgent) {
+  var text = String(items || "");
+  var tips;
+  if (isAgent) {
+    tips = [
+      "Ventilation helps it dry: a window open and the heating on if it's cold.",
+      "Furniture shouldn't go back until it's fully dry."
+    ];
+  } else {
+    tips = [
+      "Keep air moving: open a window or two, and put the heating on if it's cold.",
+      "Try to keep off it while it's damp. If you need to walk on it, wear clean socks or slippers, not outdoor shoes.",
+      "Wait until it's fully dry before putting furniture back. If something has to go back sooner, put foil or a plastic lid under each leg.",
+      "Keep pets and children off it until it's dry."
+    ];
+    if (/mattress/i.test(text)) tips.push("Let the mattress dry fully, with the room aired, before putting the bedding back on.");
+    if (/car interior/i.test(text)) tips.push("Leave the car windows open a little, if it's safe to, so the seats dry.");
+    tips.push("Once it's dry, a quick vacuum lifts the pile.");
+  }
+  return {
+    drying: AFTERCARE_DRYING,
+    tips: tips,
+    guarantee: isAgent
+      ? "If you or the check-out inspection find anything not right with what we cleaned, tell us within 7 days by email or WhatsApp and we'll come back and re-clean it free of charge."
+      : "If a mark comes back as it dries, or anything else isn't right, tell us within 7 days by email or WhatsApp and we'll come back and re-clean that area free of charge."
+  };
+}
+
+function aftercareText_(a) {
+  return "Aftercare\n" + a.drying + "\n" + a.tips.map(function (t) { return "- " + t; }).join("\n") + "\n\n" + a.guarantee;
+}
+
+function aftercareHtml_(a, c) {
+  var esc = escHtml;
+  return '<div style="margin:0 0 22px;padding:16px 18px;background:' + c.PAPER + ';border:1px solid ' + c.LINE + ';">' +
+    '<div style="font-family:' + c.SANS + ';font-weight:800;font-size:12px;letter-spacing:0.06em;text-transform:uppercase;color:' + c.INK + ';margin:0 0 8px;">Aftercare</div>' +
+    '<p style="margin:0 0 8px;font-family:' + c.SANS + ';font-size:14px;line-height:1.6;color:' + c.SLATE + ';">' + esc(a.drying) + '</p>' +
+    '<ul style="margin:0 0 10px;padding-left:18px;font-family:' + c.SANS + ';font-size:14px;line-height:1.6;color:' + c.SLATE + ';">' +
+      a.tips.map(function (t) { return '<li style="margin:0 0 4px;">' + esc(t) + '</li>'; }).join("") +
+    '</ul>' +
+    '<p style="margin:0;font-family:' + c.SANS + ';font-size:14px;line-height:1.6;color:' + c.INK + ';">' + esc(a.guarantee) + '</p>' +
+  '</div>';
+}
+
+// A short check-in 2 days after a job is signed off, while the 7-day
+// guarantee window is still open, so a problem gets raised with us rather
+// than in a review. Runs from the daily trigger. Picks up jobs signed off 2
+// to 4 days ago (so a missed morning doesn't lose one), with an email
+// address and no follow-up sent yet. Asks every customer for a review the
+// same way (the fake-reviews rules don't allow only asking happy ones).
+function sendFollowUps_() {
+  var sheet = getCustomerSheet();
+  if (!sheet) return 0;
+  var data = sheet.getDataRange().getValues();
+  var header = data[0];
+  var now = new Date();
+  var sent = 0, col = -1;
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (!v.Reference || !v.Email || v["Cancelled at"] || v["Follow-up sent"]) continue;
+    if (!(v["Completed at"] instanceof Date)) continue;
+    var daysAgo = calendarDaysBetween_(v["Completed at"], now);
+    if (daysAgo < 2 || daysAgo > 4) continue;
+    try {
+      sendFollowUpEmail_(v);
+      if (col === -1) { header = ensureColumns(sheet, ["Follow-up sent"]); col = header.indexOf("Follow-up sent") + 1; }
+      sheet.getRange(i + 1, col).setValue(new Date());
+      sent++;
+    } catch (err) {
+      noteProblem_("2-day follow-up failed for " + v.Reference, err);
+    }
+  }
+  return sent;
+}
+
+function sendFollowUpEmail_(v) {
+  var isAgent = v.Channel === "Agent/Landlord";
+  var name = isAgent ? (v.Name || v["Business name"]) : v.Name;
+  var completed = v["Completed at"];
+  var cleanedOn = Utilities.formatDate(completed, TIMEZONE, "EEEE d MMMM");
+  var deadline = Utilities.formatDate(new Date(completed.getTime() + 7 * 86400000), TIMEZONE, "EEEE d MMMM");
+  var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" + encodeURIComponent("Hi EasyClean Somerset, about the clean on " + cleanedOn + ". Ref: " + v.Reference);
+  // Each paragraph: text, plus an optional link (shown as words in the HTML
+  // version, as the address in the plain-text version).
+  var paras = isAgent
+    ? [{ text: "Just checking in on the clean at " + v.Address + " on " + cleanedOn + " (our ref " + v.Reference + ")." },
+       { text: "If the check-out or inspection flags anything about what we cleaned, tell us by " + deadline + " and we'll come back and re-clean it free of charge. Reply to this email or", link: { label: "message us on WhatsApp", url: waLink } }]
+    : [{ text: "Just checking in after we cleaned for you on " + cleanedOn + ". How is everything looking now it's dry?" },
+       { text: "If anything isn't right, such as a mark that's come back or an area that still feels damp, tell us by " + deadline + " and we'll come back and re-clean it free of charge. Reply to this email or", link: { label: "message us on WhatsApp", url: waLink } }];
+  if (!isAgent && REVIEW_URL) paras.push({ text: "If you have a minute, we'd welcome a review of how it went." });
+  var textBody = "Hi " + name + ",\n\n" +
+    paras.map(function (p) { return p.text + (p.link ? " " + p.link.label + ": " + p.link.url : ""); }).join("\n\n") +
+    (!isAgent && REVIEW_URL ? "\n" + REVIEW_URL : "") +
+    "\n\nThanks,\nEasyClean Somerset";
+  GmailApp.sendEmail(v.Email, isAgent ? "Checking in: the clean at " + v.Address : "How's everything looking after your clean?", textBody, {
+    htmlBody: buildSimpleEmailHtml({
+      name: name, heading: isAgent ? "Checking in on the clean" : "How's it looking?", paragraphs: paras,
+      button: !isAgent && REVIEW_URL ? { text: "Leave us a review", url: REVIEW_URL } : null
+    }),
+    name: "EasyClean Somerset"
+  });
+}
+
 function buildThankYouEmailHtml(d) {
   var esc = escHtml;
   var INK = "#12232B", TEAL = "#0E7C86", PAPER = "#F5F7F6", SURFACE = "#FFFFFF";
@@ -1825,6 +1954,7 @@ function buildThankYouEmailHtml(d) {
               (d.paymentDue
                 ? '<p style="margin:0 0 20px;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + INK + ';"><strong>' + esc(d.total) + ' is due today by bank transfer.</strong> The bank details are on the invoice; please use <strong>' + esc(d.invoiceNo) + '</strong> as the payment reference.</p>'
                 : '')) +
+          (d.aftercare ? aftercareHtml_(d.aftercare, { INK: INK, SLATE: SLATE, LINE: LINE, PAPER: PAPER, SANS: SANS }) : '') +
           (REVIEW_URL && !d.isAgent ?
             '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 6px;"><tr><td style="background:' + TEAL + ';border-radius:3px;">' +
               '<a href="' + REVIEW_URL + '" style="display:inline-block;padding:12px 24px;font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;color:' + ON_INK + ';text-decoration:none;">Leave us a review</a>' +
@@ -2004,7 +2134,7 @@ function newBookingReference() {
       for (var i = 1; i < data.length; i++) existing[data[i][col]] = true;
     }
   } catch (err) {
-    console.error("Couldn't read existing references: " + err);
+    noteProblem_("Couldn't read existing booking references", err);
   }
   for (var attempt = 0; attempt < 50; attempt++) {
     var ref = "EC-" + Math.floor(10000 + Math.random() * 90000);
@@ -2158,6 +2288,12 @@ function dayKey(d) {
   return Utilities.formatDate(d, TIMEZONE, "yyyy-MM-dd");
 }
 
+// Whole calendar days from a to b, in the business's time zone.
+function calendarDaysBetween_(a, b) {
+  var toUtc = function (d) { var p = dayKey(d).split("-"); return Date.UTC(+p[0], +p[1] - 1, +p[2]); };
+  return Math.round((toUtc(b) - toUtc(a)) / 86400000);
+}
+
 function adminJobSummary(v, start) {
   var isAgent = v.Channel === "Agent/Landlord";
   var signerPhone = phoneText(isAgent ? (v["Site contact phone"] || v.Phone) : v.Phone);
@@ -2228,7 +2364,7 @@ function calendarStartFor(reference) {
       if (referenceFromEvent(events[i]) === reference) return events[i].getStartTime();
     }
   } catch (err) {
-    console.error("Calendar lookup failed for " + reference + ": " + err);
+    noteProblem_("Calendar lookup failed for " + reference, err);
   }
   return null;
 }
@@ -2352,7 +2488,7 @@ function adminMarkPaid(token, isoDate, sendReceipt) {
       sendPaymentReceipt(v, paidOn);
       receiptSent = true;
     } catch (err) {
-      console.error("Receipt email failed for " + v.Reference + ": " + err);
+      noteProblem_("Receipt email failed for " + v.Reference, err);
     }
   }
   return { ok: true, paidOn: fmtDay(paidOn), receiptSent: receiptSent };
@@ -2810,7 +2946,7 @@ function invoicePdfFromDrive(url) {
   try {
     return DriveApp.getFileById(m[1] || m[2]).getBlob();
   } catch (err) {
-    console.error("Couldn't attach invoice PDF: " + err);
+    noteProblem_("Couldn't attach an invoice PDF", err);
     return null;
   }
 }
@@ -2936,7 +3072,7 @@ function cancelJobLocked_(token, opts) {
   try {
     refreshSlotsCache();
   } catch (cacheErr) {
-    console.error("Cache refresh after cancelling failed: " + cacheErr);
+    noteProblem_("Refreshing available times after a cancellation failed", cacheErr);
   }
 
   var sheet = getCustomerSheet();
@@ -2966,7 +3102,7 @@ function cancelJobLocked_(token, opts) {
       sendCancellationEmail(v, opts.reason, whenStr, fee);
       emailed = true;
     } catch (err) {
-      console.error("Cancellation email failed for " + v.Reference + ": " + err);
+      noteProblem_("Cancellation email failed for " + v.Reference, err);
       notifyOwner("Cancellation email failed for " + v.Reference,
         "The booking is cancelled" + (fee ? " and the fee invoice " + fee.inv.invoiceNo + " is in your Unpaid list" : "") +
         ", but the email to the customer didn't send (" + err + "). Let them know directly.");
@@ -3003,7 +3139,7 @@ function buildCancellationFeeInvoice(v, reason, whenStr, now) {
   try {
     blob = buildInvoicePdfBlob(feeRow, inv);
   } catch (err) {
-    console.error("Fee invoice PDF failed for " + v.Reference + ": " + err);
+    noteProblem_("Cancellation fee invoice PDF failed for " + v.Reference, err);
     notifyOwner("Fee invoice PDF failed for " + v.Reference, "The booking is cancelled and " + inv.invoiceNo + " is recorded in your Unpaid list, but its PDF couldn't be created (" + err + "). Send the customer the fee details by hand.");
   }
   if (blob) {
@@ -3011,7 +3147,7 @@ function buildCancellationFeeInvoice(v, reason, whenStr, now) {
       url = saveDocumentToDrive(INVOICES_FOLDER_NAME, now, blob);
     } catch (err) {
       url = "Not saved to Drive (see execution log)";
-      console.error("Fee invoice Drive save failed for " + v.Reference + ": " + err);
+      noteProblem_("Saving the cancellation fee invoice to Drive failed for " + v.Reference, err);
     }
   }
   return { amount: amount, invoiceNumber: invoiceNumber, inv: inv, blob: blob, url: url };
@@ -3093,7 +3229,17 @@ function buildSimpleEmailHtml(d) {
           '<p style="margin:0 0 6px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Hi ' + esc(d.name) + ',</p>' +
           '<h1 style="margin:0 0 6px;font-family:' + SANS + ';font-weight:800;font-size:24px;color:' + INK + ';">' + esc(d.heading) + '</h1>' +
           '<div style="width:36px;height:3px;background:' + STAMP + ';margin:0 0 18px;font-size:3px;line-height:3px;">&nbsp;</div>' +
-          '<p style="margin:0;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + SLATE + ';">' + esc(d.body) + '</p>' +
+          (d.paragraphs
+            ? d.paragraphs.map(function (p, i) {
+                return '<p style="margin:0 0 ' + (i === d.paragraphs.length - 1 ? '0' : '14px') + ';font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + SLATE + ';">' + esc(p.text) +
+                  (p.link ? ' <a href="' + esc(p.link.url) + '" style="color:' + TEAL + ';font-weight:700;">' + esc(p.link.label) + '</a>.' : '') + '</p>';
+              }).join("")
+            : '<p style="margin:0;font-family:' + SANS + ';font-size:14.5px;line-height:1.65;color:' + SLATE + ';">' + esc(d.body) + '</p>') +
+          (d.button
+            ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:20px 0 0;"><tr><td style="background:' + TEAL + ';border-radius:3px;">' +
+                '<a href="' + esc(d.button.url) + '" style="display:inline-block;padding:12px 24px;font-family:' + SANS + ';font-weight:700;font-size:14.5px;color:' + ON_INK + ';text-decoration:none;">' + esc(d.button.text) + '</a>' +
+              '</td></tr></table>'
+            : '') +
         '</td></tr>' +
         '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:20px 28px;text-align:center;font-family:' + SANS + ';font-weight:800;font-size:12.5px;text-transform:uppercase;color:' + SLATE + ';">EasyClean Somerset</td></tr>' +
         '<tr><td style="background:' + TEAL + ';height:5px;font-size:5px;line-height:5px;">&nbsp;</td></tr>' +
@@ -3312,7 +3458,7 @@ function priceBooking(data) {
     // the last hour: re-read it fresh once before refusing.
     if (lines.some(function (l) { return !list[l.item]; })) list = getPriceList(data.channel, true);
   } catch (err) {
-    console.error("Price list unavailable: " + err);
+    noteProblem_("Couldn't read the price list, so a booking used the page's prices", err);
     return { ok: true, verified: false, items: data.items, total: data.total, estTime: data.estTime, pageTotal: data.total };
   }
   var total = 0, mins = 0, text = [];
@@ -3408,7 +3554,7 @@ function checkServiceArea(data) {
   try {
     list = getServiceArea(false);
   } catch (err) {
-    console.error("Service area check skipped: " + err);
+    noteProblem_("Couldn't read service-area.js, so a postcode wasn't checked", err);
     return { ok: true, verified: false };
   }
   if (list.indexOf(outward) === -1) return { ok: false, error: "out_of_area", outward: outward };
@@ -3422,14 +3568,200 @@ function ownerEmail() {
 }
 
 // Never throws: an alert failing must not break whatever triggered it.
+// Returns true if the email went.
 function notifyOwner(subject, body) {
   try {
     var to = ownerEmail();
-    if (!to) return;
+    if (!to) return false;
     GmailApp.sendEmail(to, "[EasyClean] " + subject, body + "\n\n(Automatic message from your booking system.)", { name: "EasyClean booking system" });
+    return true;
   } catch (err) {
-    console.error("notifyOwner failed: " + err);
+    noteProblem_("An email to you failed to send", err);
+    return false;
   }
+}
+
+// ---- Health check and problem log (FRE-185) ----
+// Most failures here are caught so one problem never stops the rest, which
+// also means Google's own failure emails never fire. So anything that goes
+// wrong is noted in a small log (Script Properties), and each morning the
+// daily trigger checks the system and emails you if anything needs a look.
+// Once a week (Mondays) it sends a short "all fine" email even when nothing
+// is wrong, so if that stops arriving you know the checks have stopped.
+var PROBLEM_LOG_KEY = "PROBLEM_LOG";
+var PROBLEM_LOG_MAX = 25;
+var HEALTH_STATE_KEY = "HEALTH_LAST_ALERT";
+
+// Logs a problem and keeps it for the morning check. Never throws.
+function noteProblem_(where, err) {
+  var msg = String(err && err.message ? err.message : (err === undefined ? "" : err)).replace(/\s+/g, " ").slice(0, 160);
+  console.error(where + ": " + msg);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var log = readProblemLog_();
+    log.push({ t: new Date().toISOString(), where: String(where).slice(0, 90), msg: msg });
+    if (log.length > PROBLEM_LOG_MAX) log = log.slice(-PROBLEM_LOG_MAX);
+    var json = JSON.stringify(log);
+    while (json.length > 8000 && log.length > 1) { log.shift(); json = JSON.stringify(log); } // property size limit
+    props.setProperty(PROBLEM_LOG_KEY, json);
+  } catch (e) {
+    console.error("Couldn't record a problem: " + e);
+  }
+}
+
+function readProblemLog_() {
+  try { return JSON.parse(PropertiesService.getScriptProperties().getProperty(PROBLEM_LOG_KEY) || "[]") || []; }
+  catch (e) { return []; }
+}
+
+// What a customer turned away online saw go wrong, in plain words. Taken
+// slots (two people at once) and "busy" (which has its own alert) don't
+// count as problems.
+var REFUSAL_REASONS = {
+  missing_fields: "Something the form needs was missing.",
+  bad_details: "The email, phone, name or address didn't pass the checks (for example two email addresses, or no number in the phone box).",
+  bad_postcode: "The postcode wasn't a full UK postcode.",
+  out_of_area: "The postcode is outside the area in service-area.js.",
+  unknown_item: "An item in the basket isn't on the live price list. Usually a price name changed while someone had the old page open, or the page and the price list disagree.",
+  bad_items: "The basket was empty, too big, or had an odd quantity.",
+  server_error: "The booking system hit an error. Details are in Apps Script under Executions."
+};
+var REFUSALS_NOT_ALERTED = ["slot_taken", "busy"];
+
+// A website booking was turned away: note it, and email you straight away
+// (at most once an hour; any more are in the next morning's check).
+function noteRefusedBooking_(data, code) {
+  if (REFUSALS_NOT_ALERTED.indexOf(code) !== -1) return;
+  var reason = REFUSAL_REASONS[code] || "Error code: " + code;
+  if (code !== "server_error") noteProblem_("Online booking turned away (" + code + ")", reason); // server errors are already noted
+  try {
+    var cache = CacheService.getScriptCache();
+    var key = "refusedAlert_" + Utilities.formatDate(new Date(), TIMEZONE, "yyyyMMddHH");
+    if (cache.get(key)) return;
+    cache.put(key, "1", 3700);
+    var d = data || {};
+    var str = function (x) { return String(x === undefined || x === null ? "" : x).slice(0, 200); };
+    var items = Array.isArray(d.lineItems) && d.lineItems.length
+      ? d.lineItems.map(function (l) { return str(l && l.qty) + "x " + str(l && l.item); }).join(", ")
+      : str(d.items);
+    notifyOwner("Online booking turned away (" + code + ")", [
+      "Someone tried to book on the website and it didn't go through.",
+      "",
+      "Why: " + reason,
+      "",
+      "What they entered:",
+      "Name: " + str(d.name) + (d.businessName ? " (" + str(d.businessName) + ")" : ""),
+      "Phone: " + str(d.phone),
+      "Email: " + str(d.email),
+      "Address: " + str(d.address) + (d.postcode ? ", " + str(d.postcode) : ""),
+      "Items: " + items,
+      "Time picked: " + str(d.slotLabel || d.startTime),
+      "",
+      "The page offered them WhatsApp instead, so they may message you. If the details look like nonsense, it was probably a bot and you can ignore this.",
+      "You'll get at most one of these an hour. Any others are listed in the next morning's check."
+    ].join("\n"));
+  } catch (err) {
+    console.error("Turned-away booking alert failed: " + err);
+  }
+}
+
+// The morning check. Emails you only when something needs a look, plus a
+// short "all fine" note on Mondays. The same unchanged problem isn't
+// repeated more than every 3 days. Pass { force: true } to always email.
+function dailyHealthCheck_(opts) {
+  opts = opts || {};
+  var now = opts.now || new Date();
+  var issues = [];
+  var check = function (label, fn) {
+    try { var msg = fn(); if (msg) issues.push(msg); }
+    catch (err) { issues.push(label + " (" + String(err && err.message || err).slice(0, 160) + ")"); }
+  };
+  check("Couldn't work out the available booking times", function () {
+    var slots = refreshSlotsCache();
+    return slots.length ? "" : "No online booking times in the next " + DAYS_AHEAD + " days. Fine if you've blocked that time off; otherwise check your calendar.";
+  });
+  ["Consumer", "Agent/Landlord"].forEach(function (ch) {
+    check("Couldn't read the prices on " + priceListPage(ch) + ", so bookings are taken at the page's prices", function () {
+      var n = Object.keys(getPriceList(ch, true)).length;
+      return n >= 5 ? "" : "Only " + n + " prices found on " + priceListPage(ch) + ". Check the price rows on that page.";
+    });
+  });
+  check("Couldn't read service-area.js, so postcodes aren't being checked", function () { getServiceArea(true); return ""; });
+  check("Couldn't check the email allowance", function () {
+    var left = MailApp.getRemainingDailyQuota();
+    return left >= 20 ? "" : "Only " + left + " emails left in today's Gmail allowance. When it runs out, confirmations and these alerts stop until it resets.";
+  });
+  check("Couldn't check the scheduled jobs", function () {
+    var names = ScriptApp.getProjectTriggers().map(function (t) { return t.getHandlerFunction(); });
+    return names.indexOf("refreshSlotsCache") !== -1 ? "" : "The 10-minute refresh of available times isn't scheduled. Run setUpAutoRefresh once.";
+  });
+  check("Couldn't open the customer sheet", function () { return getCustomerSheet() ? "" : "The customer sheet can't be found, so bookings aren't being recorded. Run setUpCustomerSheet."; });
+  check("Couldn't check the settings", function () {
+    var missing = [];
+    if (!getAdminUrl()) missing.push("ADMIN_URL");
+    if (!getBankDetails().complete) missing.push("the bank details");
+    return missing.length ? "Missing from Script Properties: " + missing.join(" and ") + "." : "";
+  });
+  check("Couldn't check the bank holiday list", function () {
+    var latest = getBankHolidays().slice().sort().pop();
+    if (!latest) return "";
+    var p = latest.split("-");
+    var daysLeft = Math.round((Date.UTC(+p[0], +p[1] - 1, +p[2]) - now.getTime()) / 86400000);
+    return daysLeft >= 60 ? "" : "The bank holiday list only runs to " + latest + " and GOV.UK hasn't been read recently. Add the next year's dates to BANK_HOLIDAYS_BUILT_IN.";
+  });
+
+  var log = readProblemLog_();
+  var grouped = {}, order = [];
+  log.forEach(function (e) {
+    var k = e.where + "|" + e.msg;
+    if (!grouped[k]) { grouped[k] = { where: e.where, msg: e.msg, count: 0, last: e.t }; order.push(k); }
+    grouped[k].count++; grouped[k].last = e.t;
+  });
+  var events = order.map(function (k) {
+    var g = grouped[k];
+    return (g.count > 1 ? g.count + "x " : "") + g.where + (g.msg ? ": " + g.msg : "") + " (last " + fmtWhen(new Date(g.last)) + ")";
+  });
+
+  var props = PropertiesService.getScriptProperties();
+  var signature = issues.join("|");
+  var state = {};
+  try { state = JSON.parse(props.getProperty(HEALTH_STATE_KEY) || "{}") || {}; } catch (e) { state = {}; }
+  var isMonday = Utilities.formatDate(now, TIMEZONE, "u") === "1";
+  var repeat = state.signature === signature && state.sentAt && now.getTime() - new Date(state.sentAt).getTime() < 3 * 86400000;
+
+  var subject, body;
+  if (issues.length || events.length) {
+    if (!opts.force && !events.length && repeat) return { sent: false, issues: issues, events: events };
+    var n = issues.length + events.length;
+    subject = "Booking system check: " + n + (n === 1 ? " thing" : " things") + " to look at";
+    body = (issues.length ? "Needs a look now:\n" + issues.map(function (x) { return "- " + x; }).join("\n") + "\n\n" : "") +
+      (events.length ? "Went wrong since the last check:\n" + events.map(function (x) { return "- " + x; }).join("\n") + "\n\n" : "") +
+      "More detail is in Apps Script under Executions.";
+  } else if (isMonday || opts.force) {
+    subject = "Booking system check: all fine";
+    body = "This morning's check found nothing wrong: booking times, prices, service area, email allowance, scheduled jobs, customer sheet and settings.\n\n" +
+      "You get this note once a week. If it stops arriving, the morning job has stopped: run setUpDailyReminders once to restart it.";
+  } else {
+    return { sent: false, issues: issues, events: events };
+  }
+  var sent = notifyOwner(subject, body);
+  if (sent) {
+    props.setProperty(PROBLEM_LOG_KEY, "[]");
+    props.setProperty(HEALTH_STATE_KEY, JSON.stringify({ signature: signature, sentAt: now.toISOString() }));
+  }
+  return { sent: sent, issues: issues, events: events };
+}
+
+/**
+ * Run this from the editor any time to check the booking system now
+ * (pick "checkBookingSystem" in the function dropdown and press Run). It
+ * always emails you the result, and the log shows it too.
+ */
+function checkBookingSystem() {
+  requireOwner();
+  var r = dailyHealthCheck_({ force: true });
+  Logger.log(r.issues.length || r.events.length ? "Problems: " + r.issues.concat(r.events).join(" | ") : "All fine.");
+  return { ok: true, sent: r.sent, problems: r.issues.length + r.events.length };
 }
 
 function sendNewBookingAlert(data, reference, jobToken, start, priced) {
