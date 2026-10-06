@@ -31,6 +31,7 @@ Check these before changing either side.
 - **Bookings:** `booking.js` sends `POST { action: "book", ... }` as JSON. Code.gs checks every field again and sends back `ok` or an error code that the page understands.
   - **Optional fields:** `parking` (the radio button's value, up to 60 characters) and `notes` (up to 400). Code.gs joins them into the job's Notes as "Parking: ... ." followed by the notes.
   - **Agent page:** the business name is optional. If it's blank, Code.gs uses the person's name, the same as the admin app does for a private landlord.
+  - **Early start (home page only):** `earlyStart` is `true` when the customer ticked the box asking us to clean within their 14-day cancellation period. The page shows the box when the chosen time is within 14 days of today, and Code.gs works that out again with `CANCEL_DAYS`. Both use UK dates. A booking without the tick is never refused: Code.gs records "Not given" and flags it in the new-booking email.
 - **Prices:**
   - **Where Code.gs reads them:** it doesn't trust the price the page sends. It reads the price rows on the built `index.html` and `agents.html` pages, in `parsePriceRows`.
   - **What it looks for:** each row must stay as `<div class="item-row" data-item="..." data-price="..." data-mins="...">`, with `class="item-row"` exactly. An extra class or a renamed attribute stops the price check finding the rows.
@@ -51,5 +52,6 @@ The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. I
 - Aftercare plus a 2-day follow-up email (FRE-193).
 - Trader details at the foot of every customer email: name and town, a link to the business details in the terms, and the email address (FRE-189). Customer emails go out through `sendCustomerEmail_`, which adds them to the plain-text version. The HTML builders add `traderHtml_()`.
 - Booking form parking question and notes box, and an optional business name for private landlords (FRE-192). Notes now show in the new-booking email and the admin app's job view.
+- Consumer Contracts Regulations (FRE-181): an "Early start request" column, a line in the new-booking email, and the right-to-cancel information with the model cancellation form in homeowner confirmation emails. Agent bookings are unchanged.
 
 This matches Apps Script once that version is deployed.

@@ -692,6 +692,11 @@ layout: null
   .bf-row textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
   .bf-row textarea:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .bf-hint { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--slate); }
+  .bf-row[hidden] { display: none; }
+  .bf-terms { margin: 16px 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
+  .bf-terms a { color: var(--teal-deep); font-weight: 600; }
+  .bf-row label.bf-checkbox-row.bf-early-start { align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink); line-height: 1.5; }
+  .bf-early-start input[type="checkbox"] { margin-top: 3px; }
   .bf-row label.bf-choice { display: flex; align-items: center; gap: 10px; font-size: 14.5px; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); cursor: pointer; padding: 6px 0; }
   .bf-choice input[type="radio"] { width: 18px; height: 18px; flex: none; accent-color: var(--teal); margin: 0; }
   .bf-radio { display: flex; gap: 18px; margin-top: 2px; }
@@ -1234,6 +1239,11 @@ layout: null
           <div class="bf-row">
             <label class="bf-checkbox-row"><input type="checkbox" id="bf-marketing"> Keep me posted about seasonal offers and cleaning reminders</label>
           </div>
+          <!-- Shown by booking.js when the chosen time is within the 14-day cancellation period. -->
+          <div class="bf-row" id="bf-early-row" hidden>
+            <label class="bf-checkbox-row bf-early-start"><input type="checkbox" id="bf-early-start"> I ask EasyClean Somerset to carry out my clean within my 14-day cancellation period. I understand I&#8217;ll pay for any work done if I cancel after it starts, and that I lose my right to cancel once the clean is complete.</label>
+          </div>
+          <p class="bf-terms">By confirming, you agree to our <a href="terms.html">terms and conditions</a>, including your right to cancel in <a href="terms.html#cancel">section 11</a>.</p>
           <button type="submit" class="btn btn-primary" id="bf-submit" disabled>Confirm booking</button>
           <div id="bf-status" class="bf-status" style="display:none;"></div>
           <div class="bf-alt-day">Can&#8217;t find a day that works? <a href="#" target="_blank" rel="noopener" id="bf-alt-day-wa">Send us a message</a> and we&#8217;ll sort a time directly.</div>

@@ -524,17 +524,43 @@ window.ecBooking = function (config) {
 
   // Confirm switches on once a time is picked, every box marked "required"
   // on the form is filled in, and the postcode is one we cover.
+  // ---- Starting within the 14-day cancellation period (home page) ----
+  // A homeowner who books online can cancel within 14 days. To clean inside
+  // that time, the law needs them to ask us to. So when the chosen time is
+  // within it, a tick box appears and Confirm waits for it. The booking
+  // system records the answer. The agent page has no box (business bookings).
+  var CANCEL_DAYS = 14;
+  function ukDayNumber(d) {
+    var p = d.toLocaleDateString("en-CA", { timeZone: "Europe/London" }).split("-"); // YYYY-MM-DD
+    return Date.UTC(+p[0], +p[1] - 1, +p[2]) / 86400000;
+  }
+  function withinCancellationPeriod(start) {
+    return ukDayNumber(new Date(start)) - ukDayNumber(new Date()) <= CANCEL_DAYS;
+  }
+  function earlyStartOk() {
+    var row = document.getElementById("bf-early-row");
+    if (!row) return true;
+    var needed = !!selectedSlot && withinCancellationPeriod(selectedSlot);
+    if (row.hidden === needed) {
+      row.hidden = !needed;
+      if (needed) announce("This time is within your 14-day cancellation period. Please tick the box above Confirm to ask us to clean within it.");
+    }
+    return !needed || document.getElementById("bf-early-start").checked;
+  }
+
   function updateSubmitEnabled() {
     var required = document.querySelectorAll("#booking-form input[required]");
     var filled = Array.prototype.every.call(required, function (el) {
       return el.value.trim() !== "";
     });
-    var ok = !!selectedSlot && filled && postcodeArea().status === "ok";
+    var early = earlyStartOk();
+    var ok = !!selectedSlot && filled && postcodeArea().status === "ok" && early;
     var btn = document.getElementById("bf-submit");
     if (ok) btn.removeAttribute("disabled"); else btn.setAttribute("disabled", "disabled");
   }
 
   document.getElementById("booking-form").addEventListener("input", updateSubmitEnabled);
+  document.getElementById("booking-form").addEventListener("change", updateSubmitEnabled);
 
   // ---- Access on the day (agent page) ----
   // A named person on site, or the agent arranging access with us at least
@@ -670,6 +696,8 @@ window.ecBooking = function (config) {
     var parking = document.querySelector('input[name="bf-parking"]:checked');
     payload.parking = parking ? parking.value : "";
     payload.notes = document.getElementById("bf-notes") ? value("bf-notes") : "";
+    var earlyRow = document.getElementById("bf-early-row");
+    if (earlyRow) payload.earlyStart = !earlyRow.hidden && document.getElementById("bf-early-start").checked;
     if (accessChoices.length) {
       payload.accessArrange = accessArrange();
       payload.siteContactName = accessArrange() ? "" : value("bf-site-contact-name");

@@ -633,6 +633,9 @@ layout: null
   .bf-row textarea { resize: vertical; min-height: 84px; line-height: 1.5; }
   .bf-row textarea:focus { outline: 2px solid var(--teal); outline-offset: 1px; }
   .bf-hint { margin: 0; font-size: 13.5px; line-height: 1.5; color: var(--slate); }
+  .bf-row[hidden] { display: none; }
+  .bf-terms { margin: 16px 0 12px; font-size: 13.5px; line-height: 1.5; color: var(--ink-soft); }
+  .bf-terms a { color: var(--teal-deep); font-weight: 600; }
   .bf-pay-note { margin: 2px 0 0; font-size: 14.5px; line-height: 1.5; color: var(--ink); }
   .bf-row label.bf-choice { display: flex; align-items: center; gap: 10px; font-size: 15px; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--ink); cursor: pointer; padding: 6px 0; }
   .bf-choice input[type="radio"] { width: 18px; height: 18px; flex: none; accent-color: var(--teal); margin: 0; }
@@ -1124,6 +1127,7 @@ layout: null
           <div class="bf-row">
             <label class="bf-checkbox-row"><input type="checkbox" id="bf-marketing"> Keep me posted about availability and landlord/agent offers</label>
           </div>
+          <p class="bf-terms">By confirming, you agree to our <a href="terms.html">terms and conditions</a>.</p>
           <button type="submit" class="btn btn-primary" id="bf-submit" disabled>Confirm booking</button>
           <div id="bf-status" class="bf-status" style="display:none;"></div>
           <div class="bf-alt-day">Can&#8217;t find a day that works? <a href="#" target="_blank" rel="noopener" id="bf-alt-day-wa">Send us a message</a> and we&#8217;ll sort a time directly.</div>
