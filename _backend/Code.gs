@@ -91,6 +91,12 @@
  *      the admin app's "Time off" tab blocks other days or hours.
  *  18. Check Project Settings -> Time zone is Europe/London (slot times
  *      depend on it, especially when the clocks change).
+ *  19. Run backfillIncomeColumn once: it fills the new "Income" column for
+ *      jobs already signed off and bookings already cancelled, so the column
+ *      adds up correctly (a cancelled booking counts its fee, not its total).
+ *  20. The monthly figures email goes out from the daily trigger on the 1st
+ *      of each month. Run sendFiguresPreview any time to get last month's
+ *      email now, and see the same numbers in the admin app's Figures tab.
  *
  * IMPORTANT — updating this file later (every time, not just the first
  * time): pasting new code into the editor and saving it is NOT enough on
@@ -435,7 +441,7 @@ function setUpCustomerSheet() {
 function appendCustomerRow(data, reference, slotLabel, jobToken) {
   var sheet = getCustomerSheet();
   if (!sheet) return; // setUpCustomerSheet() hasn't been run yet
-  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", "Early start request"]);
+  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", "Early start request", "Est. mins"]);
   var byHeader = {
     "Timestamp": new Date(),
     "Reference": reference,
@@ -458,7 +464,10 @@ function appendCustomerRow(data, reference, slotLabel, jobToken) {
     "Access": data.channel === "Agent/Landlord" ? accessLabel(data) : "",
     "Booked via": data.bookedVia || "Website",
     "Notes": data.notes || "",
-    "Early start request": earlyStartRecord_(data.cancellation)
+    "Early start request": earlyStartRecord_(data.cancellation),
+    // The estimate the customer was shown, in minutes, so the job page's
+    // timer can show actual against estimate (FRE-194).
+    "Est. mins": parseMinsText_(data.estTime) || ""
     // Completed at / Signature link / Invoice number are deliberately not
     // set here — completeJob() fills those in later, once the job's signed
     // off, the same way it already looks its columns up by header name.
@@ -1201,15 +1210,17 @@ function bookingTimeText(v) {
 function sendDayOfReminders() {
   // The one daily trigger runs everything that happens each morning (no
   // extra setup needed): day-before reminders, the Monday unpaid digest,
-  // today's reminders, the 2-day follow-ups, and last of all the health
-  // check, so it can report anything that failed this morning. Each part is
-  // separate so one failing never stops the others.
+  // today's reminders, the 2-day follow-ups, the monthly figures email (on
+  // the 1st), and last of all the health check, so it can report anything
+  // that failed this morning. Each part is separate so one failing never
+  // stops the others.
   try { sendDayBeforeReminders(); } catch (err) { noteProblem_("Day-before reminders failed", err); }
   try {
     if (Utilities.formatDate(new Date(), TIMEZONE, "u") === "1") sendUnpaidDigest();
   } catch (err) { noteProblem_("Unpaid invoices email failed", err); }
   try { sendTodaysReminders_(); } catch (err) { noteProblem_("Morning reminders failed", err); }
   try { sendFollowUps_(); } catch (err) { noteProblem_("2-day follow-up emails failed", err); }
+  try { sendMonthlyFigures_(); } catch (err) { noteProblem_("Monthly figures email failed", err); }
   try { dailyHealthCheck_(); } catch (err) { console.error("Health check failed: " + err); }
 }
 
@@ -1593,10 +1604,24 @@ function completeJobLocked_(data) {
     notifyOwner("Invoice PDF failed for " + ref, "The job is marked complete, but its invoice PDF couldn't be created (" + err + "), so the customer's email went without it. Send the invoice by hand.");
   }
   if (data.signature) {
+    var photos = null;
     try {
-      completionBlob = buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, data.signature);
+      photos = photosForPdf_(v);
+    } catch (err) {
+      noteProblem_("Reading the job photos for the completion PDF failed for " + ref, err);
+    }
+    try {
+      completionBlob = buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, data.signature, photos);
     } catch (err) {
       noteProblem_("Job completion PDF failed for " + ref, err);
+      if (photos) {
+        // Try again without the photos, so the customer still gets the signed confirmation.
+        try {
+          completionBlob = buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, data.signature, null);
+        } catch (err2) {
+          noteProblem_("Job completion PDF failed again, without photos, for " + ref, err2);
+        }
+      }
     }
   }
 
@@ -1639,6 +1664,28 @@ function completeJobLocked_(data) {
   Object.keys(writes).forEach(function (header) {
     sheet.getRange(row.rowIndex, headerRow.indexOf(header) + 1).setValue(writes[header]);
   });
+
+  // Time on job (FRE-194): a job that was started but never finished is
+  // finished at sign-off, if that's within a working day of the start.
+  try {
+    var startedAt = v["Started at"] instanceof Date ? v["Started at"] : null;
+    if (startedAt && !(v["Finished at"] instanceof Date) &&
+        completedAt.getTime() - startedAt.getTime() <= AUTO_FINISH_MAX_MINS * 60000) {
+      var timingHeader = ensureColumns(sheet, TIMING_COLUMNS);
+      setRowValues_(sheet, row.rowIndex, timingHeader, {
+        "Finished at": completedAt,
+        "Actual mins": Math.max(0, Math.round((completedAt.getTime() - startedAt.getTime()) / 60000))
+      });
+    }
+  } catch (err) {
+    noteProblem_("Recording the time on job failed for " + ref, err);
+  }
+  // Income (FRE-187): what this job adds to the books.
+  try {
+    writeIncome_(sheet, row.rowIndex, jobIncomeAmount_(v));
+  } catch (err) {
+    noteProblem_("Recording the income failed for " + ref, err);
+  }
 
   try {
     var attachments = [invoiceBlob, completionBlob].filter(function (b) { return b; });
@@ -1924,7 +1971,7 @@ function sendThankYouEmail(v, inv, attachments) {
 // (as happened 21 Sept 2026, before a Drive authorisation gap was found
 // and fixed) silently never saved in the first place. Same rendering
 // approach as the invoice: HtmlService -> PDF, plain CSS, self-contained.
-function buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, signatureDataUrl) {
+function buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, signatureDataUrl, photos) {
   var esc = escHtml;
   var lines = parseItemLines(v.Items);
   var billToName = v.Channel === "Agent/Landlord" ? v["Business name"] : v.Name;
@@ -1948,6 +1995,8 @@ function buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, signatureDataU
     '.sig-block{margin-top:28px;}' +
     '.sig-label{font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#5C6F73;margin-bottom:6px;}' +
     '.sig-img{display:block;max-width:280px;max-height:110px;border-bottom:1px solid #12232B;padding-bottom:6px;}' +
+    '.photos{margin-top:28px;}' +
+    '.ph{width:45%;margin:0 2% 8px 0;border:1px solid #DCE3E2;}' +
     '.foot{margin-top:32px;font-size:11px;color:#5C6F73;}' +
     '</style></head><body>' +
     '<div class="brand"><img src="' + LOGO_URL + '" width="32" height="32" alt="" /><h1>Job Completion Confirmation</h1></div>' +
@@ -1964,6 +2013,7 @@ function buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, signatureDataU
         : 'Customer signature') + '</div>' +
       '<img class="sig-img" src="' + signatureDataUrl + '" />' +
     '</div>' +
+    photosPdfHtml_(photos) +
     '<div class="foot">EasyClean Somerset &middot; Invoice ' + esc(formatInvoiceNo(invoiceNumber)) + '</div>' +
     '</body></html>';
 
@@ -2597,6 +2647,7 @@ function adminGetJob(token) {
   job.hasCalendarEvent = !!start;
   job.lateNotice = !!start && isLateCancellation(start, new Date());
   job.feeAmount = "£" + LATE_CANCELLATION_FEE;
+  addTimingAndPhotos_(job, row);
   return job;
 }
 
@@ -2671,6 +2722,259 @@ function adminMarkUnpaid(token) {
   return { ok: true };
 }
 
+
+// ---- Time on job and before/after photos (FRE-194) ----
+// Start and Finish taps on the admin app's job page record how long a job
+// really took, next to the estimate the customer was given, so the price
+// list can be recalibrated after the first 10 to 15 jobs. Photos are saved to
+// a private Drive folder per job (evidence if there's a dispute, and
+// marketing material), and for agent jobs can go in the completion PDF.
+
+var TIMING_COLUMNS = ["Est. mins", "Started at", "Finished at", "Actual mins"];
+var PHOTO_COLUMNS = ["Photos folder", "Photos in PDF"];
+var PHOTOS_FOLDER_NAME = "EasyClean Somerset — Job photos";
+var PHOTO_KINDS = { before: "Before", after: "After" };
+var MAX_PHOTO_DATA_CHARS = 6000000; // about 4.5 MB of photo; the page sends about 0.5 MB
+var PHOTOS_IN_PDF_MAX = 4;          // of each of Before and After
+var AUTO_FINISH_MAX_MINS = 480;     // a job left running at sign-off is finished then, if within 8 hours
+
+// Runs fn holding the script lock. Returns { ok:false } if it's busy.
+function withScriptLock_(fn) {
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { return { ok: false, error: "Busy, try again in a moment." }; }
+  try { return fn(); } finally { lock.releaseLock(); }
+}
+
+// "~1h 55m", "2h" or "45 min" as minutes, or null.
+function parseMinsText_(text) {
+  var m = /^~?\s*(?:(\d+)\s*h)?\s*(?:(\d+)\s*(?:min|m))?$/i.exec(String(text || "").trim());
+  if (!m || (m[1] === undefined && m[2] === undefined)) return null;
+  var mins = (parseInt(m[1], 10) || 0) * 60 + (parseInt(m[2], 10) || 0);
+  return mins > 0 ? mins : null;
+}
+
+// The estimate for a job in minutes: from the sheet, or for older bookings
+// from the "Est. time:" line in its calendar event. Null if there isn't one.
+function estMinsFor_(v) {
+  var stored = parseInt(v["Est. mins"], 10);
+  if (stored > 0) return stored;
+  try {
+    var ev = findBookingEvent_(v.Reference);
+    var m = ev && /^Est\. time:\s*(.*)$/m.exec(ev.getDescription() || "");
+    return m ? parseMinsText_(m[1]) : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function validDate_(x) {
+  return x instanceof Date && !isNaN(x.getTime()) ? x : null;
+}
+
+function clockText_(d) {
+  return Utilities.formatDate(d, TIMEZONE, "h:mma").replace("AM", "am").replace("PM", "pm");
+}
+
+// What the job page needs to show the timer. Plain numbers and text only.
+function timingFor_(v, estMins) {
+  var s = validDate_(v["Started at"]), f = validDate_(v["Finished at"]);
+  var actual = parseInt(v["Actual mins"], 10) || 0;
+  if (!actual && s && f) actual = Math.max(0, Math.round((f.getTime() - s.getTime()) / 60000));
+  return {
+    estMins: estMins || 0,
+    startedMs: s ? s.getTime() : 0,
+    startedAt: s ? clockText_(s) : "",
+    finishedMs: f ? f.getTime() : 0,
+    actualMins: actual
+  };
+}
+
+// Tap "Start job". Starting again after finishing starts a fresh timer.
+function adminStartJob(token) {
+  requireOwner();
+  return withScriptLock_(function () {
+    var row = findBookingByToken(token);
+    if (!row) return { ok: false, error: "Couldn't find that job." };
+    var v = row.values;
+    if (v["Cancelled at"]) return { ok: false, error: "This booking is cancelled." };
+    if (v["Completed at"]) return { ok: false, error: "This job is already signed off." };
+    var est = estMinsFor_(v);
+    if (validDate_(v["Started at"]) && !validDate_(v["Finished at"])) return { ok: true, timing: timingFor_(v, est) }; // already running
+    var sheet = getCustomerSheet();
+    var header = ensureColumns(sheet, TIMING_COLUMNS);
+    var now = new Date();
+    var writes = { "Started at": now, "Finished at": "", "Actual mins": "" };
+    if (est && !(parseInt(v["Est. mins"], 10) > 0)) writes["Est. mins"] = est;
+    setRowValues_(sheet, row.rowIndex, header, writes);
+    var after = {}; Object.keys(v).forEach(function (k) { after[k] = v[k]; });
+    after["Started at"] = now; after["Finished at"] = ""; after["Actual mins"] = "";
+    return { ok: true, timing: timingFor_(after, est) };
+  });
+}
+
+// Tap "Finish job". Records the minutes since Start.
+function adminFinishJob(token) {
+  requireOwner();
+  return withScriptLock_(function () {
+    var row = findBookingByToken(token);
+    if (!row) return { ok: false, error: "Couldn't find that job." };
+    var v = row.values;
+    if (v["Completed at"]) return { ok: false, error: "This job is already signed off." };
+    var est = estMinsFor_(v);
+    var started = validDate_(v["Started at"]);
+    if (!started) return { ok: false, error: "Tap Start job first." };
+    if (validDate_(v["Finished at"])) return { ok: true, timing: timingFor_(v, est) }; // already finished
+    var sheet = getCustomerSheet();
+    var header = ensureColumns(sheet, TIMING_COLUMNS);
+    var now = new Date();
+    var mins = Math.max(0, Math.round((now.getTime() - started.getTime()) / 60000));
+    setRowValues_(sheet, row.rowIndex, header, { "Finished at": now, "Actual mins": mins });
+    var after = {}; Object.keys(v).forEach(function (k) { after[k] = v[k]; });
+    after["Finished at"] = now; after["Actual mins"] = mins;
+    return { ok: true, timing: timingFor_(after, est) };
+  });
+}
+
+// Undo for a mis-tap: clears the timer (the estimate stays).
+function adminResetTimer(token) {
+  requireOwner();
+  return withScriptLock_(function () {
+    var row = findBookingByToken(token);
+    if (!row) return { ok: false, error: "Couldn't find that job." };
+    var v = row.values;
+    if (v["Completed at"]) return { ok: false, error: "This job is already signed off." };
+    var sheet = getCustomerSheet();
+    var header = ensureColumns(sheet, TIMING_COLUMNS);
+    setRowValues_(sheet, row.rowIndex, header, { "Started at": "", "Finished at": "", "Actual mins": "" });
+    return { ok: true, timing: timingFor_({}, estMinsFor_(v)) };
+  });
+}
+
+// The job's photo folder in Drive, or null (created first when `create`).
+// The folder's link is kept in the sheet. If someone deletes the folder, the
+// next photo starts a new one.
+function photoFolderFor_(v, create) {
+  var id = (/[-\w]{20,}$/.exec(String(v["Photos folder"] || "")) || [])[0];
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (err) { /* gone: fall through */ }
+  }
+  if (!create) return null;
+  var who = v.Channel === "Agent/Landlord" ? (v["Business name"] || v.Name) : v.Name;
+  var name = (String(v.Reference) + " " + String(who || "")).replace(/[\\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+  return getOrCreateFolder(PHOTOS_FOLDER_NAME).createFolder(name);
+}
+
+function photoCounts_(folder, reference) {
+  var counts = { before: 0, after: 0 };
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    var name = files.next().getName();
+    if (name.indexOf(reference + "-before-") === 0) counts.before++;
+    else if (name.indexOf(reference + "-after-") === 0) counts.after++;
+  }
+  return counts;
+}
+
+// Adds the timer, photo counts and folder link to a job for the job page.
+function addTimingAndPhotos_(job, row) {
+  var v = row.values;
+  var est = estMinsFor_(v);
+  if (est && !(parseInt(v["Est. mins"], 10) > 0)) {
+    // Remember it, so older bookings only look it up in the calendar once.
+    try {
+      var sheet = getCustomerSheet();
+      setRowValues_(sheet, row.rowIndex, ensureColumns(sheet, ["Est. mins"]), { "Est. mins": est });
+    } catch (err) { /* only a convenience */ }
+  }
+  var t = timingFor_(v, est);
+  job.estMins = t.estMins; job.startedMs = t.startedMs; job.startedAt = t.startedAt;
+  job.finishedMs = t.finishedMs; job.actualMins = t.actualMins;
+  job.photoBefore = 0; job.photoAfter = 0; job.photosFolderUrl = "";
+  job.photosInPdf = String(v["Photos in PDF"] || "") !== "No";
+  try {
+    var folder = photoFolderFor_(v, false);
+    if (folder) {
+      var c = photoCounts_(folder, v.Reference);
+      job.photoBefore = c.before; job.photoAfter = c.after; job.photosFolderUrl = folder.getUrl();
+    }
+  } catch (err) {
+    noteProblem_("Reading the photo folder failed for " + v.Reference, err);
+  }
+}
+
+// Saves one photo (a JPEG data URL, already shrunk by the page) as Before or
+// After. The page sends them one at a time.
+function adminAddPhoto(token, kind, dataUrl) {
+  requireOwner();
+  var label = PHOTO_KINDS[String(kind || "").toLowerCase()];
+  if (!label) return { ok: false, error: "Pick Before or After." };
+  dataUrl = String(dataUrl || "");
+  if (dataUrl.indexOf("data:image/jpeg;base64,") !== 0) return { ok: false, error: "That doesn't look like a photo." };
+  if (dataUrl.length > MAX_PHOTO_DATA_CHARS) return { ok: false, error: "That photo is too big." };
+  return withScriptLock_(function () {
+    var row = findBookingByToken(token);
+    if (!row) return { ok: false, error: "Couldn't find that job." };
+    var v = row.values, ref = v.Reference;
+    var folder = photoFolderFor_(v, true);
+    var counts = photoCounts_(folder, ref);
+    var n = counts[label.toLowerCase()] + 1;
+    var stamp = Utilities.formatDate(new Date(), TIMEZONE, "yyyyMMdd-HHmmss");
+    var name = ref + "-" + label.toLowerCase() + "-" + stamp + "-" + n + ".jpg";
+    var bytes = Utilities.base64Decode(dataUrl.slice("data:image/jpeg;base64,".length));
+    folder.createFile(Utilities.newBlob(bytes, "image/jpeg", name));
+    counts[label.toLowerCase()] = n;
+    var url = folder.getUrl();
+    if (String(v["Photos folder"] || "") !== url) {
+      var sheet = getCustomerSheet();
+      setRowValues_(sheet, row.rowIndex, ensureColumns(sheet, PHOTO_COLUMNS), { "Photos folder": url });
+    }
+    return { ok: true, photoBefore: counts.before, photoAfter: counts.after, photosFolderUrl: url };
+  });
+}
+
+// The "include the photos in the completion PDF" tick on the job page.
+// Blank means yes, "No" means leave them out.
+function adminSetPhotosInPdf(token, include) {
+  requireOwner();
+  return withScriptLock_(function () {
+    var row = findBookingByToken(token);
+    if (!row) return { ok: false, error: "Couldn't find that job." };
+    var sheet = getCustomerSheet();
+    setRowValues_(sheet, row.rowIndex, ensureColumns(sheet, PHOTO_COLUMNS), { "Photos in PDF": include ? "" : "No" });
+    return { ok: true, photosInPdf: !!include };
+  });
+}
+
+// Photos for an agent's completion PDF: up to PHOTOS_IN_PDF_MAX Before and
+// After, oldest first, as data URLs. Null if none, or not an agent job, or
+// the tick on the job page was turned off.
+function photosForPdf_(v) {
+  if (v.Channel !== "Agent/Landlord" || String(v["Photos in PDF"] || "") === "No") return null;
+  var folder = photoFolderFor_(v, false);
+  if (!folder) return null;
+  var found = [], files = folder.getFiles();
+  while (files.hasNext()) { var f = files.next(); found.push({ name: f.getName(), file: f }); }
+  found.sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; });
+  var out = { before: [], after: [] };
+  found.forEach(function (x) {
+    var kind = x.name.indexOf(v.Reference + "-before-") === 0 ? "before" : x.name.indexOf(v.Reference + "-after-") === 0 ? "after" : "";
+    if (!kind || out[kind].length >= PHOTOS_IN_PDF_MAX) return;
+    out[kind].push("data:image/jpeg;base64," + Utilities.base64Encode(x.file.getBlob().getBytes()));
+  });
+  return out.before.length || out.after.length ? out : null;
+}
+
+function photosPdfHtml_(photos) {
+  if (!photos) return "";
+  var grid = function (title, list) {
+    return list.length
+      ? '<div class="sig-label" style="margin:14px 0 6px;">' + title + '</div><div>' +
+          list.map(function (u) { return '<img class="ph" src="' + u + '" />'; }).join("") + '</div>'
+      : "";
+  };
+  return '<div class="photos"><div class="sig-label">Photos taken on the day</div>' +
+    grid("Before", photos.before) + grid("After", photos.after) + '</div>';
+}
 
 // ---- Admin app: add a booking yourself, and edit a job (FRE-183) ----
 // For phone, WhatsApp and Quick Quote jobs, price matches, extra items
@@ -3167,6 +3471,294 @@ function sendUnpaidDigest() {
   return true;
 }
 
+// ---- Monthly figures and the Income column (FRE-187) ----
+// A cancelled booking keeps its original Total in the sheet next to the £25
+// fee, so adding up the Total column overstates income. The "Income" column
+// holds what each signed-off job or cancellation really adds, so it adds up
+// correctly. It is filled in at sign-off and at cancellation, and
+// backfillIncomeColumn fills it in for older rows.
+//
+// The figures email (first of the month, from the daily trigger) and the
+// admin app's Figures tab work the same numbers out from the sheet. Income is
+// counted on the day a job is signed off, or a cancellation fee invoiced, not
+// the day it is paid. What is still unpaid is shown separately.
+
+var INCOME_COLUMN = "Income";
+var VAT_THRESHOLD = 90000;            // turnover over any 12 months that means registering for VAT
+var FIGURES_YEAR = "tax";             // "tax" counts the year to date from 6 April, "calendar" from 1 January
+var FIGURES_TARGET_AVG_JOB = 140;     // business plan targets
+var FIGURES_TARGET_JOBS_WEEK = "5 to 7";
+var FIGURES_LAST_MONTH_KEY = "FIGURES_LAST_MONTH"; // the last month already emailed, "yyyy-MM"
+var FIGURE_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+// What a signed-off job adds: its total, or nothing for a "No charge" job.
+function jobIncomeAmount_(v) {
+  if (/no charge/i.test(String(v["Payment method"] || ""))) return 0;
+  var n = parseMoney_(v.Total);
+  return n === null || n < 0 ? 0 : n;
+}
+
+// What one row adds to the books, and the day it counts on ("yyyy-MM-dd"),
+// or null if it isn't done yet. A cancelled booking adds its fee (if one was
+// charged), never its total.
+function incomeFor_(v) {
+  if (v["Cancelled at"]) {
+    var c = validDate_(v["Cancelled at"]);
+    var fee = parseMoney_(v["Cancellation fee"]);
+    return { amount: fee > 0 ? fee : 0, key: c ? dayKey(c) : "", kind: "cancelled" };
+  }
+  if (v["Completed at"]) {
+    var d = validDate_(v["Completed at"]);
+    return { amount: jobIncomeAmount_(v), key: d ? dayKey(d) : "", kind: "job" };
+  }
+  return null;
+}
+
+function writeIncome_(sheet, rowIndex, amount) {
+  var header = ensureColumns(sheet, [INCOME_COLUMN]);
+  var cell = sheet.getRange(rowIndex, header.indexOf(INCOME_COLUMN) + 1);
+  cell.setNumberFormat("£#,##0.00");
+  cell.setValue(amount);
+}
+
+/**
+ * Run once (function dropdown -> Run) after pasting this version. Fills the
+ * Income column for jobs already signed off and bookings already cancelled.
+ * Rows that already have an Income are left alone. Safe to run again.
+ */
+function backfillIncomeColumn() {
+  var sheet = getCustomerSheet();
+  if (!sheet) { Logger.log("Customer sheet not set up."); return; }
+  ensureColumns(sheet, [INCOME_COLUMN]);
+  var data = sheet.getDataRange().getValues();
+  var header = data[0], filled = 0, kept = 0;
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (!v.Reference) continue;
+    var inc = incomeFor_(v);
+    if (!inc) continue;
+    var existing = v[INCOME_COLUMN];
+    if (existing !== "" && existing !== undefined && existing !== null) { kept++; continue; }
+    writeIncome_(sheet, i + 1, inc.amount);
+    filled++;
+  }
+  Logger.log("Income filled in for " + filled + " row(s). " + kept + " already had one.");
+}
+
+function readFigureRows_(sheet) {
+  var data = sheet.getDataRange().getValues();
+  var header = data[0], rows = [];
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (v.Reference) rows.push(v);
+  }
+  return rows;
+}
+
+// ---- Dates as "yyyy-MM-dd" keys in the business's time zone ----
+function pad2_(n) { return (n < 10 ? "0" : "") + n; }
+function keyUtc_(key) { var p = key.split("-"); return Date.UTC(+p[0], +p[1] - 1, +p[2]); }
+function keyFromUtc_(ms) { var d = new Date(ms); return d.getUTCFullYear() + "-" + pad2_(d.getUTCMonth() + 1) + "-" + pad2_(d.getUTCDate()); }
+function addDaysKey_(key, n) { return keyFromUtc_(keyUtc_(key) + n * 86400000); }
+function keyDays_(a, b) { return Math.round((keyUtc_(b) - keyUtc_(a)) / 86400000); }
+// The first of the month, `offset` months from the one `key` is in.
+function monthStartKey_(key, offset) {
+  var p = key.split("-");
+  return keyFromUtc_(Date.UTC(+p[0], +p[1] - 1 + offset, 1));
+}
+function yearStartKey_(todayKey) {
+  var p = todayKey.split("-"), y = +p[0];
+  if (FIGURES_YEAR === "calendar") return y + "-01-01";
+  return (p[1] + "-" + p[2] >= "04-06" ? y : y - 1) + "-04-06";
+}
+function monthName_(key) { var p = key.split("-"); return FIGURE_MONTHS[+p[1] - 1] + " " + p[0]; }
+function shortDate_(key) { var p = key.split("-"); return (+p[2]) + " " + FIGURE_MONTHS[+p[1] - 1].slice(0, 3) + " " + p[0]; }
+
+// £ with thousands separators, and pence only when there are some.
+function gbp_(n) {
+  n = Math.round(n * 100) / 100;
+  var a = Math.abs(n);
+  var s = (a % 1 === 0 ? String(a) : a.toFixed(2)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return (n < 0 ? "-" : "") + "£" + s;
+}
+
+// Everything for one period, from `fromKey` up to but not including `toKey`.
+function computePeriod_(rows, fromKey, toKey, label) {
+  var inRange = function (k) { return !!k && k >= fromKey && k < toKey; };
+  var p = {
+    label: label, days: Math.max(1, keyDays_(fromKey, toKey)),
+    jobs: 0, paidJobs: 0, jobRevenue: 0, feeCount: 0, feeAmount: 0,
+    cancelled: { total: 0, customer: 0, noaccess: 0, us: 0 },
+    bookings: { total: 0, consumer: 0, agent: 0, website: 0, admin: 0 },
+    referrals: {}, timing: { n: 0, actual: 0, est: 0 }
+  };
+  rows.forEach(function (v) {
+    var inc = incomeFor_(v);
+    if (inc && inRange(inc.key)) {
+      if (inc.kind === "job") {
+        p.jobs++; p.jobRevenue += inc.amount;
+        if (inc.amount > 0) p.paidJobs++;
+        var actual = parseInt(v["Actual mins"], 10) || 0, est = parseInt(v["Est. mins"], 10) || 0;
+        if (actual > 0 && est > 0) { p.timing.n++; p.timing.actual += actual; p.timing.est += est; }
+      } else {
+        p.cancelled.total++;
+        var by = String(v["Cancelled by"] || "");
+        if (/^Customer/i.test(by)) p.cancelled.customer++;
+        else if (/^No access/i.test(by)) p.cancelled.noaccess++;
+        else if (/^We cancelled/i.test(by)) p.cancelled.us++;
+        if (inc.amount > 0) { p.feeCount++; p.feeAmount += inc.amount; }
+      }
+    }
+    var made = validDate_(v.Timestamp);
+    if (made && inRange(dayKey(made))) {
+      p.bookings.total++;
+      if (v.Channel === "Agent/Landlord") p.bookings.agent++; else p.bookings.consumer++;
+      if (String(v["Booked via"] || "") === "Admin app") p.bookings.admin++; else p.bookings.website++;
+      var code = String(v["Referral / offer code"] || "").trim().toUpperCase();
+      if (code) p.referrals[code] = (p.referrals[code] || 0) + 1;
+    }
+  });
+  p.income = p.jobRevenue + p.feeAmount;
+  return p;
+}
+
+// All the periods the email and the Figures tab use, worked out from the rows.
+function computeFigures_(rows, now) {
+  var today = dayKey(now), tomorrow = addDaysKey_(today, 1);
+  var thisMonth = monthStartKey_(today, 0), lastMonth = monthStartKey_(today, -1), yearStart = yearStartKey_(today);
+  var p = today.split("-");
+  var yearAgo = keyFromUtc_(Date.UTC(+p[0] - 1, +p[1] - 1, +p[2]));
+  var f = {
+    thisMonth: computePeriod_(rows, thisMonth, tomorrow, "This month so far (" + monthName_(thisMonth) + ")"),
+    lastMonth: computePeriod_(rows, lastMonth, thisMonth, monthName_(lastMonth)),
+    ytd: computePeriod_(rows, yearStart, tomorrow, "Year to date (since " + shortDate_(yearStart) + ")"),
+    rolling: computePeriod_(rows, addDaysKey_(yearAgo, 1), tomorrow, "Last 12 months"),
+    unpaid: { count: 0, amount: 0, overdueCount: 0, overdueAmount: 0 },
+    noDate: 0
+  };
+  rows.forEach(function (v) {
+    var inc = incomeFor_(v);
+    if (inc && !inc.key) f.noDate++;
+    if (!v["Payment due"] || v["Paid on"]) return; // the same rule as the admin app's Unpaid tab
+    var amount = parseMoney_(v["Cancellation fee"] || v.Total) || 0;
+    f.unpaid.count++; f.unpaid.amount += amount;
+    var due = validDate_(v["Payment due"]);
+    if (due && dayKey(due) < today) { f.unpaid.overdueCount++; f.unpaid.overdueAmount += amount; }
+  });
+  return f;
+}
+
+function listText_(parts) { return parts.length ? parts.join(", ") : ""; }
+
+// The lines for one period as [label, value] pairs.
+function periodRows_(p) {
+  var rows = [];
+  rows.push(["Jobs completed", String(p.jobs)]);
+  rows.push(["Job revenue", gbp_(p.jobRevenue)]);
+  rows.push(["Cancellation and call-out fees", p.feeCount ? gbp_(p.feeAmount) + " (" + p.feeCount + ")" : "none"]);
+  rows.push(["Total income", gbp_(p.income)]);
+  rows.push(["Average job", p.paidJobs ? gbp_(Math.round(p.jobRevenue / p.paidJobs)) + " (target " + gbp_(FIGURES_TARGET_AVG_JOB) + ")" : "none yet"]);
+  // Too few days to mean anything (one job on the 2nd is not "3.5 a week").
+  rows.push(["Jobs a week", p.days < 14 ? "too early to say (target " + FIGURES_TARGET_JOBS_WEEK + ")"
+    : (Math.round(p.jobs / (p.days / 7) * 10) / 10) + " (target " + FIGURES_TARGET_JOBS_WEEK + ")"]);
+  var c = p.cancelled;
+  rows.push(["Cancelled bookings", c.total
+    ? c.total + " (" + listText_([c.customer ? "customer " + c.customer : "", c.noaccess ? "no access " + c.noaccess : "", c.us ? "we cancelled " + c.us : ""].filter(String)) + ")"
+    : "none"]);
+  var b = p.bookings;
+  rows.push(["Bookings made", b.total ? b.total + " (homeowner " + b.consumer + ", landlord or agent " + b.agent + ")" : "none"]);
+  if (b.total) rows.push(["Booked on", "website " + b.website + ", admin app " + b.admin]);
+  var codes = Object.keys(p.referrals).sort(function (x, y) { return p.referrals[y] - p.referrals[x] || (x < y ? -1 : 1); }).slice(0, 8);
+  rows.push(["Referral codes", codes.length ? codes.map(function (k) { return k + " x" + p.referrals[k]; }).join(", ") : "none"]);
+  var t = p.timing;
+  rows.push(["Time on job", t.n
+    ? t.n + " timed, average " + formatMinsServer(Math.round(t.actual / t.n)) + " against an estimate of " + formatMinsServer(Math.round(t.est / t.n))
+    : "none timed yet"]);
+  return rows;
+}
+
+// Sections for the email and the Figures tab: { title, rows, note?, bar? }.
+function figureSections_(f, withThisMonth) {
+  var sections = [];
+  if (withThisMonth) sections.push({ title: f.thisMonth.label, rows: periodRows_(f.thisMonth) });
+  sections.push({ title: f.lastMonth.label, rows: periodRows_(f.lastMonth) });
+  sections.push({ title: f.ytd.label, rows: periodRows_(f.ytd) });
+  var turnover = f.rolling.income, pct = Math.round(turnover / VAT_THRESHOLD * 1000) / 10;
+  sections.push({
+    title: "VAT threshold, last 12 months",
+    rows: [["Turnover", gbp_(turnover)], ["Threshold", gbp_(VAT_THRESHOLD)], ["Used", pct + "%"], ["Room left", gbp_(Math.max(0, VAT_THRESHOLD - turnover))]],
+    bar: Math.min(100, pct),
+    note: "Jobs signed off plus cancellation fees." + (pct >= 80 ? " Over 80% of the threshold: check on GOV.UK when you need to register before you reach it." : "")
+  });
+  sections.push({
+    title: "Unpaid now",
+    rows: [["Unpaid invoices", f.unpaid.count ? f.unpaid.count + " (" + gbp_(f.unpaid.amount) + ")" : "none"],
+           ["Overdue", f.unpaid.overdueCount ? f.unpaid.overdueCount + " (" + gbp_(f.unpaid.overdueAmount) + ")" : "none"]]
+  });
+  if (f.noDate) {
+    sections.push({ title: "Needs a look", rows: [["Signed-off or cancelled rows with no usable date, left out of the figures", String(f.noDate)]] });
+  }
+  return sections;
+}
+
+function figuresEmailText_(f) {
+  var lines = ["These come from your Bookings sheet. Income is counted on the day a job was signed off, or a cancellation fee was invoiced, not the day it was paid.", ""];
+  figureSections_(f, false).forEach(function (s) {
+    lines.push(s.title.toUpperCase());
+    s.rows.forEach(function (r) { lines.push(r[0] + ": " + r[1]); });
+    if (s.note) lines.push(s.note);
+    lines.push("");
+  });
+  var url = getAdminUrl();
+  lines.push(url ? "More in the admin app (Figures tab): " + url : "More in the admin app's Figures tab.");
+  return lines.join("\n");
+}
+
+// Emails last month's figures once a month. Called every morning by the daily
+// trigger: it sends on the first morning of a new month and does nothing
+// after that, and if the 1st was missed it sends on the next morning that
+// runs. The first time it ever runs mid-month it only notes the month, so the
+// first email is the one on the next 1st. opts.force sends now without
+// touching that (see sendFiguresPreview).
+function sendMonthlyFigures_(opts) {
+  opts = opts || {};
+  var now = opts.now || new Date();
+  var today = dayKey(now);
+  var reportKey = monthStartKey_(today, -1).slice(0, 7);
+  var props = PropertiesService.getScriptProperties();
+  var last = props.getProperty(FIGURES_LAST_MONTH_KEY);
+  if (!opts.force) {
+    if (last === reportKey) return false;
+    if (!last && today.slice(8) !== "01") { props.setProperty(FIGURES_LAST_MONTH_KEY, reportKey); return false; }
+  }
+  var sheet = getCustomerSheet();
+  if (!sheet) return false;
+  var f = computeFigures_(readFigureRows_(sheet), now);
+  var p = f.lastMonth;
+  var sent = notifyOwner("Figures for " + p.label + ": " + p.jobs + (p.jobs === 1 ? " job, " : " jobs, ") + gbp_(p.income), figuresEmailText_(f));
+  if (sent && !opts.force) props.setProperty(FIGURES_LAST_MONTH_KEY, reportKey);
+  return sent;
+}
+
+/**
+ * Run from the editor (function dropdown -> Run) to email yourself last
+ * month's figures now, to see what the monthly email looks like. It doesn't
+ * stop the real one going out on the 1st.
+ */
+function sendFiguresPreview() {
+  var sent = sendMonthlyFigures_({ force: true });
+  Logger.log(sent ? "Figures emailed to you." : "Couldn't send. See the execution log and the customer sheet setup.");
+}
+
+// The same numbers for the admin app's Figures tab.
+function adminGetFigures() {
+  requireOwner();
+  var sheet = getCustomerSheet();
+  if (!sheet) return { ok: false, error: "no_sheet" };
+  var now = new Date();
+  return { ok: true, asOf: fmtDay(now), sections: figureSections_(computeFigures_(readFigureRows_(sheet), now), true) };
+}
+
 // ---- Cancelling a booking (admin app) ----
 // Removes the calendar event (so the slot is offered online again), marks
 // the booking cancelled in the sheet, optionally emails the customer, and,
@@ -3259,6 +3851,12 @@ function cancelJobLocked_(token, opts) {
   Object.keys(writes).forEach(function (h) {
     sheet.getRange(row.rowIndex, header.indexOf(h) + 1).setValue(writes[h]);
   });
+  // Income (FRE-187): a cancelled booking adds its fee, or nothing, never its total.
+  try {
+    writeIncome_(sheet, row.rowIndex, fee ? (parseMoney_(fee.amount) || 0) : 0);
+  } catch (err) {
+    noteProblem_("Recording the income failed for " + v.Reference, err);
+  }
 
   var emailed = false;
   if (opts.emailCustomer && v.Email) {

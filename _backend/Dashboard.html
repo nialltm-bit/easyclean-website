@@ -35,7 +35,7 @@
   h1 { font-family: "Big Shoulders Display", sans-serif; font-size: 26px; font-weight: 800; margin: 0 0 14px; }
   h2 { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--slate); margin: 22px 0 8px; }
   .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
-  .tab { flex: 1; background: var(--surface); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 12px; font-weight: 700; font-size: 15px; cursor: pointer; font-family: inherit; }
+  .tab { flex: 1; background: var(--surface); border: 1px solid var(--line); color: var(--ink); border-radius: 6px; padding: 12px 4px; font-weight: 700; font-size: 14.5px; cursor: pointer; font-family: inherit; }
   .tab.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
   .count { display: inline-block; min-width: 20px; padding: 1px 6px; margin-left: 6px; border-radius: 10px; background: var(--stamp); color: var(--on-ink); font-size: 12px; }
   .search { display: flex; gap: 8px; }
@@ -103,6 +103,10 @@
   .totals { display: flex; justify-content: space-between; font-weight: 700; padding: 10px 0 2px; font-size: 15px; }
   .confirm-box { margin-top: 10px; padding: 12px; border-radius: 6px; background: var(--stamp-tint); font-size: 14px; }
   .hidden { display: none !important; }
+  .timer-big { font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 44px; line-height: 1; margin: 2px 0 8px; font-variant-numeric: tabular-nums; }
+  .bar { height: 8px; border-radius: 4px; background: var(--line); margin: 10px 0 4px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--teal); }
+  .note a { color: var(--teal-deep); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -139,7 +143,7 @@
     });
   }
   function $(id) { return document.getElementById(id); }
-  function app(html) { $("app").innerHTML = html; }
+  function app(html) { clearInterval(state.tick); $("app").innerHTML = html; }
   function todayIso() {
     var d = new Date();
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
@@ -210,8 +214,10 @@
       '<button class="tab' + (state.tab === "jobs" ? " on" : "") + '" onclick="setTab(\'jobs\')">Jobs</button>' +
       '<button class="tab' + (state.tab === "unpaid" ? " on" : "") + '" onclick="setTab(\'unpaid\')">Unpaid' + (o.unpaid.length ? '<span class="count">' + o.unpaid.length + '</span>' : '') + '</button>' +
       '<button class="tab' + (state.tab === "timeoff" ? " on" : "") + '" onclick="setTab(\'timeoff\')">Time off</button>' +
+      '<button class="tab' + (state.tab === "figures" ? " on" : "") + '" onclick="setTab(\'figures\')">Figures</button>' +
     '</div>';
     if (state.tab === "timeoff") { app(tabs + timeOffHtml()); loadBlocks(); return; }
+    if (state.tab === "figures") { app(tabs + '<div id="fig"><p class="loading">Loading&hellip;</p></div>'); loadFigures(); return; }
     var body;
     if (state.tab === "jobs") {
       body = '<button class="btn btn-primary" style="margin-bottom:12px;" onclick="newBooking()">+ New booking</button>' +
@@ -235,6 +241,27 @@
   }
 
   function setTab(t) { state.tab = t; renderHome(); }
+
+  // ---------- Figures ----------
+  // The same numbers as the monthly email. The server does the sums.
+  function loadFigures() {
+    call("adminGetFigures").then(function (r) {
+      if (!r.ok) throw new Error(r.error === "no_sheet" ? "The customer sheet isn't set up." : r.error);
+      if (state.tab !== "figures" || !$("fig")) return;
+      $("fig").innerHTML = '<p class="note" style="margin:0 0 4px;">As of ' + esc(r.asOf) + '. Income is counted on the day a job is signed off, or a cancellation fee is invoiced, not the day it is paid.</p>' +
+        r.sections.map(figureSection).join("");
+    }).catch(function (err) {
+      if ($("fig")) $("fig").innerHTML = '<p class="note bad">Couldn&#8217;t load the figures: ' + esc(err && err.message || err) + '</p>';
+    });
+  }
+
+  function figureSection(s) {
+    return '<h2>' + esc(s.title) + '</h2><div class="card">' +
+      s.rows.map(function (r) { return '<div class="row"><span class="label">' + esc(r[0]) + '</span><span class="value">' + esc(r[1]) + '</span></div>'; }).join("") +
+      (typeof s.bar === "number" ? '<div class="bar" role="img" aria-label="' + esc(s.bar) + ' percent of the threshold used"><span style="width:' + esc(s.bar) + '%"></span></div>' : '') +
+      (s.note ? '<p class="note">' + esc(s.note) + '</p>' : '') +
+    '</div>';
+  }
 
 
   // ---------- Add a booking yourself / edit a job ----------
@@ -620,15 +647,18 @@
         detail("Reason", j.cancelledBy) + detail("Note", j.cancelNote) +
         (j.cancelFee ? detail("Fee", j.cancelFee) + detail("Invoice", j.invoiceNo) + detail("Payment due", j.paymentDue) + detail("Paid", j.paidOn || "Not yet") : "") +
         (j.invoiceUrl ? '<a class="btn btn-ghost" style="margin-top:10px;" href="' + esc(j.invoiceUrl) + '" target="_blank" rel="noopener">View fee invoice</a>' : '') +
-      '</div>');
+      '</div>' + photosCard(j));
+      initPhotos(j);
       return;
     }
     if (j.completed) {
       app(head + '<div class="card">' +
         '<p style="margin:0 0 8px;"><span class="pill done">Signed off ' + esc(j.completedAt) + '</span></p>' +
         detail("Invoice", j.invoiceNo) + detail("Payment due", j.paymentDue) + detail("Paid", j.paidOn) +
+        detail("Time on job", j.actualMins ? minsText(j.actualMins) + (j.estMins ? " (estimate " + minsText(j.estMins) + ")" : "") : "") +
         (j.invoiceUrl ? '<a class="btn btn-ghost" style="margin-top:10px;" href="' + esc(j.invoiceUrl) + '" target="_blank" rel="noopener">View invoice</a>' : '') +
-      '</div>');
+      '</div>' + photosCard(j));
+      initPhotos(j);
       return;
     }
     var waText = "Hi " + (j.contact || j.name) + ", could you confirm today's clean is done? Tap here to sign it off: " + j.signingLink;
@@ -636,6 +666,8 @@
     state.flash = "";
     app(head + flash +
       '<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="openEdit(\'' + esc(j.token) + '\')">Edit job (details, items, price, time)</button>' +
+      '<div class="card" id="timer"><div class="pad-label">Time on job</div><div id="timer-body"></div></div>' +
+      photosCard(j) +
       '<div class="card">' +
         '<div class="pad-label">Customer signature</div>' +
         '<p class="note" style="margin:0 0 10px;">By signing below, the customer confirms the work above has been completed to their satisfaction.</p>' +
@@ -659,6 +691,149 @@
       cancelPanel(j));
     initPad(j);
     initCancel(j);
+    renderTimer(j);
+    initPhotos(j);
+  }
+
+  // ---------- Time on job ----------
+  // Start when you begin, Finish when you're done. Sign-off finishes it for
+  // you if you forget. The minutes go in the sheet next to the estimate.
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+
+  function tickClock(startedMs) {
+    var el = $("t-clock");
+    if (!el) { clearInterval(state.tick); return; }
+    var secs = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
+    el.textContent = Math.floor(secs / 3600) + ":" + pad2(Math.floor(secs % 3600 / 60)) + ":" + pad2(secs % 60);
+  }
+
+  function timerCall(fn, j, btn, busy) {
+    var label = btn.textContent;
+    btn.disabled = true; btn.textContent = busy;
+    call(fn, j.token).then(function (r) {
+      if (!r.ok) throw new Error(r.error);
+      var t = r.timing;
+      j.estMins = t.estMins; j.startedMs = t.startedMs; j.startedAt = t.startedAt; j.finishedMs = t.finishedMs; j.actualMins = t.actualMins;
+      renderTimer(j);
+    }).catch(function (err) {
+      btn.disabled = false; btn.textContent = label;
+      var m = $("t-msg"); if (m) { m.className = "note bad"; m.textContent = "Couldn't save that: " + (err && err.message || err); }
+    });
+  }
+
+  function renderTimer(j) {
+    var el = $("timer-body");
+    if (!el) return;
+    clearInterval(state.tick);
+    var est = j.estMins ? "Estimate " + minsText(j.estMins) + "." : "No estimate for this job.";
+    if (!j.startedMs) {
+      el.innerHTML = '<p class="note" style="margin:0 0 10px;">' + est + ' Tap when you start, and again when you finish.</p>' +
+        '<button class="btn btn-primary" id="t-start">Start job</button><p class="note" id="t-msg"></p>';
+      $("t-start").onclick = function () { timerCall("adminStartJob", j, this, "Starting…"); };
+    } else if (!j.finishedMs) {
+      el.innerHTML = '<div class="timer-big" id="t-clock">0:00:00</div>' +
+        '<p class="note" style="margin:0 0 10px;">Started ' + esc(j.startedAt) + '. ' + est + '</p>' +
+        '<button class="btn btn-primary" id="t-finish">Finish job</button>' +
+        '<div style="text-align:center;"><button class="btn-link" id="t-reset">Reset timer</button></div><p class="note" id="t-msg"></p>';
+      tickClock(j.startedMs);
+      state.tick = setInterval(function () { tickClock(j.startedMs); }, 1000);
+      $("t-finish").onclick = function () { timerCall("adminFinishJob", j, this, "Saving…"); };
+      $("t-reset").onclick = function () { timerCall("adminResetTimer", j, this, "Resetting…"); };
+    } else {
+      var diff = j.estMins ? j.estMins - j.actualMins : null;
+      var vs = diff === null ? "No estimate to compare with."
+        : diff > 0 ? minsText(diff) + " quicker than the estimate of " + minsText(j.estMins) + "."
+        : diff < 0 ? minsText(-diff) + " longer than the estimate of " + minsText(j.estMins) + "."
+        : "Right on the estimate of " + minsText(j.estMins) + ".";
+      el.innerHTML = '<div class="timer-big">' + esc(minsText(j.actualMins)) + '</div>' +
+        '<p class="note" style="margin:0 0 6px;">Started ' + esc(j.startedAt) + '. ' + esc(vs) + '</p>' +
+        '<div style="text-align:center;"><button class="btn-link" id="t-reset">Undo and start again</button></div><p class="note" id="t-msg"></p>';
+      $("t-reset").onclick = function () { timerCall("adminResetTimer", j, this, "Resetting…"); };
+    }
+  }
+
+  // ---------- Before and after photos ----------
+  // Shrunk on the phone first (a camera photo is several MB), then saved one
+  // at a time to a private Drive folder for the job.
+  function photosCard(j) {
+    return '<div class="card" id="photos"><div class="pad-label">Photos</div>' +
+      '<div class="btn-row" style="margin-top:0;"><button class="btn btn-ghost" id="ph-before-btn">Before photo</button><button class="btn btn-ghost" id="ph-after-btn">After photo</button></div>' +
+      '<input type="file" id="ph-before" accept="image/*" multiple hidden><input type="file" id="ph-after" accept="image/*" multiple hidden>' +
+      '<p class="note" id="ph-msg" aria-live="polite"></p>' +
+      (j.channel === "Agent/Landlord" && !j.completed && !j.cancelled
+        ? '<label class="check"><input type="checkbox" id="ph-pdf"' + (j.photosInPdf ? ' checked' : '') + '> Put the photos in the completion PDF emailed to the agent</label>'
+        : '') +
+    '</div>';
+  }
+
+  function photoStatus(j) {
+    var el = $("ph-msg");
+    if (!el) return;
+    el.className = "note";
+    el.innerHTML = (j.photoBefore || j.photoAfter
+      ? 'Saved: ' + j.photoBefore + ' before, ' + j.photoAfter + ' after.'
+      : 'No photos yet. They&#8217;re saved to a private folder in your Drive.') +
+      (j.photosFolderUrl ? ' <a href="' + esc(j.photosFolderUrl) + '" target="_blank" rel="noopener">Open the photo folder</a>' : '');
+  }
+
+  function shrinkPhoto(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, 1800 / Math.max(img.naturalWidth, img.naturalHeight));
+        var c = document.createElement("canvas");
+        c.width = Math.max(1, Math.round(img.naturalWidth * scale)); c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        resolve(c.toDataURL("image/jpeg", 0.82));
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("Couldn't read that photo.")); };
+      img.src = url;
+    });
+  }
+
+  function uploadPhotos(j, kind, files) {
+    if (!files.length) return;
+    var msg = $("ph-msg"), btns = [$("ph-before-btn"), $("ph-after-btn")], i = 0;
+    btns.forEach(function (b) { b.disabled = true; });
+    function done() { btns.forEach(function (b) { b.disabled = false; }); }
+    function next() {
+      if (i >= files.length) { done(); photoStatus(j); msg.insertAdjacentHTML("afterbegin", (i === 1 ? "Photo saved. " : i + " photos saved. ")); return; }
+      msg.className = "note"; msg.textContent = "Saving photo " + (i + 1) + " of " + files.length + "…";
+      shrinkPhoto(files[i]).then(function (dataUrl) { return call("adminAddPhoto", j.token, kind, dataUrl); }).then(function (r) {
+        if (!r.ok) throw new Error(r.error);
+        j.photoBefore = r.photoBefore; j.photoAfter = r.photoAfter; j.photosFolderUrl = r.photosFolderUrl;
+        i++; next();
+      }).catch(function (err) {
+        done();
+        msg.className = "note bad";
+        msg.textContent = "Couldn't save photo " + (i + 1) + ": " + (err && err.message || err) + (i ? " " + i + " saved." : "");
+      });
+    }
+    next();
+  }
+
+  function initPhotos(j) {
+    ["before", "after"].forEach(function (kind) {
+      var btn = $("ph-" + kind + "-btn"), input = $("ph-" + kind);
+      btn.onclick = function () { input.click(); };
+      input.onchange = function () {
+        var files = Array.prototype.slice.call(input.files);
+        input.value = "";
+        uploadPhotos(j, kind, files);
+      };
+    });
+    photoStatus(j);
+    var tick = $("ph-pdf");
+    if (tick) tick.onchange = function () {
+      call("adminSetPhotosInPdf", j.token, tick.checked).then(function (r) {
+        if (!r.ok) throw new Error(r.error);
+        j.photosInPdf = r.photosInPdf;
+      }).catch(function (err) {
+        tick.checked = !tick.checked;
+        $("ph-msg").className = "note bad"; $("ph-msg").textContent = "Couldn't save that: " + (err && err.message || err);
+      });
+    };
   }
 
   // ---------- Cancelling a booking ----------
