@@ -46,7 +46,30 @@ Check these before changing either side.
 
 The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. It emails Niall if anything needs a look, including problems noted since the last check, and sends a short "all fine" note on Mondays. Turned-away website bookings also email him straight away (at most one an hour). To run the check by hand, pick `checkBookingSystem` in the function dropdown and press Run.
 
+## Time on job, photos and figures
+
+All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any of it.
+
+- **Time on job (FRE-194):** the job page has Start and Finish buttons. They fill four columns in the Bookings sheet: `Est. mins` (the estimate the customer was shown; for older bookings it's read from the calendar event the first time), `Started at`, `Finished at` and `Actual mins`. If a job was started and never finished, sign-off finishes it, but only if that's within 8 hours of the start (`AUTO_FINISH_MAX_MINS`).
+- **Photos (FRE-194):** Before and After buttons on the job page, on every job including signed-off and cancelled ones. The page shrinks each photo to 1800 pixels first. They're saved to a private Drive folder per job, inside "EasyClean Somerset — Job photos", named `EC-12345 Name`. The sheet's `Photos folder` column keeps the link, and the job page counts the files in the folder.
+- **Photos in the agent PDF (FRE-194):** an agent job's completion PDF includes up to 4 Before and 4 After photos, unless the tick on the job page is turned off (`Photos in PDF` column says "No"). If the photos can't be read or make the PDF fail, the PDF is made without them and the problem is noted for the morning check. Homeowner PDFs never have photos.
+- **Income column (FRE-187):** the `Income` column holds what each signed-off job or cancellation adds to the books: the job's total (nothing for "No charge"), or for a cancellation its fee, or nothing. Cancelled rows keep their original `Total`, so add up `Income`, not `Total`. It's filled in at sign-off and at cancellation. Run `backfillIncomeColumn` once to fill it for older rows.
+- **Monthly figures (FRE-187):** the daily trigger emails Niall last month's figures on the first morning of each month (and on the next morning that runs if the 1st was missed). The first time it ever runs, mid-month, it only notes the month, so the first email is on the next 1st. Run `sendFiguresPreview` to get one now. The admin app's Figures tab shows the same numbers, plus this month so far.
+- **How the figures count:** income is counted on the day a job is signed off, or a cancellation fee is invoiced, not the day it's paid. "Year to date" starts on 6 April (the tax year); change `FIGURES_YEAR` to `"calendar"` for 1 January. The VAT line is turnover over the last 12 months against `VAT_THRESHOLD` (£90,000). Unpaid uses the same rule as the Unpaid tab.
+
+## Tests
+
+- `node _tests/backend.test.js` runs `Code.gs` in Node with Google's services faked (`_tests/fake-google.js`). It needs no setup.
+- `node _tests/dashboard.test.js` drives `Dashboard.html` in a browser against the same fake, so the page and `Code.gs` are checked together. It needs the Playwright setup from `booking.test.js`.
+- These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
+
 ## Last updated
+
+7 October 2026:
+
+- Time on job (Start and Finish on the job page) and Before and After photos, with the photos optionally in the agent completion PDF (FRE-194). New sheet columns: `Est. mins`, `Started at`, `Finished at`, `Actual mins`, `Photos folder`, `Photos in PDF`.
+- Monthly figures email, Figures tab in the admin app, and an `Income` column that fixes cancelled bookings overstating income (FRE-187). Run `backfillIncomeColumn` once.
+- Needs both `Code.gs` and `Dashboard.html` pasted into Apps Script, and both deployments redeployed.
 
 6 October 2026:
 
