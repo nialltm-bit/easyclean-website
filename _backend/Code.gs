@@ -97,6 +97,9 @@
  *  20. The monthly figures email goes out from the daily trigger on the 1st
  *      of each month. Run sendFiguresPreview any time to get last month's
  *      email now, and see the same numbers in the admin app's Figures tab.
+ *  21. Run setUpManageTokens once (FRE-213): it gives every open booking a
+ *      "Manage token", so its reminder emails get the Change or cancel
+ *      button that opens my-booking.html on the website.
  *
  * IMPORTANT — updating this file later (every time, not just the first
  * time): pasting new code into the editor and saving it is NOT enough on
@@ -247,6 +250,13 @@ function doGet(e) {
     if (p.action === "job") {
       return jsonResponse(getPublicJob(p.t));
     }
+    // my-booking.html: a customer viewing or moving their own booking (FRE-213)
+    if (p.action === "booking") {
+      return jsonResponse(getPublicBooking(p.t));
+    }
+    if (p.action === "rescheduleSlots") {
+      return jsonResponse(getRescheduleSlots(p.t));
+    }
     return jsonResponse({ ok: false, error: "unknown_action" });
   } catch (err) {
     noteProblem_("Website request failed", err);
@@ -258,8 +268,10 @@ function notAvailable() {
   return ContentService.createTextOutput("Not available.");
 }
 
-// Public endpoints only: taking a booking, and a customer signing their own
-// job from an emailed/WhatsApped link carrying its secret token. Everything
+// Public endpoints only: taking a booking, a customer signing their own
+// job from an emailed/WhatsApped link carrying its secret token, and a
+// customer cancelling or moving their own booking from the link in their
+// emails (a different secret token, see FRE-213 below). Everything
 // else (completing without a signature, sending signing links, marking
 // invoices paid) happens in the private admin app via google.script.run.
 function doPost(e) {
@@ -278,6 +290,13 @@ function doPost(e) {
     }
     if (data.action === "complete") {
       return jsonResponse(completeJobPublic(data));
+    }
+    // my-booking.html: a customer cancelling or moving their own booking (FRE-213)
+    if (data.action === "cancel") {
+      return jsonResponse(cancelBookingPublic(data));
+    }
+    if (data.action === "reschedule") {
+      return jsonResponse(rescheduleBookingPublic(data));
     }
     return jsonResponse({ ok: false, error: "unknown_action" });
   } catch (err) {
@@ -441,7 +460,7 @@ function setUpCustomerSheet() {
 function appendCustomerRow(data, reference, slotLabel, jobToken) {
   var sheet = getCustomerSheet();
   if (!sheet) return; // setUpCustomerSheet() hasn't been run yet
-  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", "Early start request", "Est. mins"]);
+  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", "Early start request", "Est. mins", MANAGE_TOKEN_COLUMN]);
   var byHeader = {
     "Timestamp": new Date(),
     "Reference": reference,
@@ -467,7 +486,9 @@ function appendCustomerRow(data, reference, slotLabel, jobToken) {
     "Early start request": earlyStartRecord_(data.cancellation),
     // The estimate the customer was shown, in minutes, so the job page's
     // timer can show actual against estimate (FRE-194).
-    "Est. mins": parseMinsText_(data.estTime) || ""
+    "Est. mins": parseMinsText_(data.estTime) || "",
+    // The customer's change-or-cancel link (FRE-213).
+    "Manage token": data.manageToken || ""
     // Completed at / Signature link / Invoice number are deliberately not
     // set here — completeJob() fills those in later, once the job's signed
     // off, the same way it already looks its columns up by header name.
@@ -485,7 +506,7 @@ function appendCustomerRow(data, reference, slotLabel, jobToken) {
 // a number, "£35" into 35 and the booking time label into a date.
 var TEXT_COLUMNS = ["Reference", "Name", "Phone", "Email", "Address", "Items", "Total", "Payment method",
   "Booking time", "Referral / offer code", "Business name", "Site contact name", "Site contact phone",
-  "Agent/Agency ID", "Job token", "Access", "Booked via", "Notes", "Changes"];
+  "Agent/Agency ID", "Job token", "Access", "Booked via", "Notes", "Changes", "Manage token"];
 
 function columnLetter(n) {
   var s = "";
@@ -613,6 +634,16 @@ function getTodaysBookingReferences() {
 }
 
 function getAvailableSlots() {
+  return computeSlots_({});
+}
+
+// The times we offer. Options, used when a customer moves a booking:
+//   ignoreReference: that booking's own event doesn't count as busy;
+//   lengthMins: how long the job takes (default SLOT_MINS);
+//   skipStartMs: leave out this start time (the one they already have).
+function computeSlots_(opts) {
+  opts = opts || {};
+  var lengthMins = opts.lengthMins > 0 ? opts.lengthMins : SLOT_MINS;
   var cal = CalendarApp.getDefaultCalendar();
   var now = new Date();
   var earliest = new Date(now.getTime() + LEAD_TIME_HOURS * 3600000);
@@ -627,7 +658,9 @@ function getAvailableSlots() {
   // whole window's events in ONE calendar lookup, then check each
   // candidate slot against that single in-memory list. Same result, a
   // fraction of the wait.
-  var busy = cal.getEvents(rangeStart, rangeEnd).map(function (ev) {
+  var busy = cal.getEvents(rangeStart, rangeEnd).filter(function (ev) {
+    return !opts.ignoreReference || referenceFromEvent(ev) !== opts.ignoreReference;
+  }).map(function (ev) {
     return { start: ev.getStartTime().getTime(), end: ev.getEndTime().getTime() };
   });
 
@@ -651,8 +684,9 @@ function getAvailableSlots() {
     times.forEach(function (t) {
       var parts = t.split(":");
       var start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), parseInt(parts[0], 10), parseInt(parts[1], 10));
-      var end = new Date(start.getTime() + SLOT_MINS * 60000);
+      var end = new Date(start.getTime() + lengthMins * 60000);
       if (start < earliest) return;
+      if (opts.skipStartMs && start.getTime() === opts.skipStartMs) return;
       if (overlapsBusy(start, end)) return;
 
       slots.push({
@@ -788,12 +822,17 @@ function earlyStartRecord_(c) {
 
 // The cancellation information and model cancellation form for the
 // confirmation email (Schedule 3 of the regulations), as plain text.
-function cancellationText_(c, reference) {
-  return "YOUR RIGHT TO CANCEL\n" +
+// FRE-212: the form normally goes out as a PDF attached to the email
+// (formAttached true), so the email just says so. If the PDF couldn't be
+// made, the form goes in the email instead, as before.
+function cancellationText_(c, reference, formAttached, hasButton) {
+  var head = "YOUR RIGHT TO CANCEL\n" +
     "You can cancel this booking within 14 days without giving a reason, so until " + c.deadline + ". " +
-    "Reply to this email, WhatsApp us, or use the form below.\n" +
+    cancelHowText_(formAttached, hasButton) + "\n" +
     (c.within && c.earlyStart ? "You asked us to do your clean within those 14 days. If you cancel after we've started, you'll pay for the work done up to then. Once the clean is complete, you can no longer cancel.\n" : "") +
-    "Full details are in section 11 of our terms: " + SITE_URL + "/terms.html#cancel\n\n" +
+    "Full details are in section 11 of our terms: " + SITE_URL + "/terms.html#cancel";
+  if (formAttached) return head;
+  return head + "\n\n" +
     "CANCELLATION FORM\n" +
     "(Only fill in and send this form if you want to cancel.)\n" +
     "To: " + BUSINESS_NAME + " trading as EasyClean Somerset, " + BUSINESS_ADDRESS + ". Email: " + TRADER_EMAIL + "\n" +
@@ -806,7 +845,14 @@ function cancellationText_(c, reference) {
 }
 
 // The same, for the HTML confirmation email.
-function cancellationHtml_(c, reference, k) {
+// How to cancel, for the right-to-cancel section. hasButton: the email has
+// the Change or cancel button (FRE-213).
+function cancelHowText_(formAttached, hasButton) {
+  return (hasButton ? "Use the Change or cancel button above, reply to this email, WhatsApp us," : "Reply to this email, WhatsApp us,") +
+    " or use the " + (formAttached ? "cancellation form attached" : "form below") + ".";
+}
+
+function cancellationHtml_(c, reference, k, formAttached, hasButton) {
   var esc = escHtml;
   var p = function (text, extra) {
     return '<p style="margin:0 0 10px;font-family:' + k.SANS + ';font-size:13.5px;line-height:1.6;color:' + k.SLATE + ';' + (extra || '') + '">' + text + '</p>';
@@ -818,9 +864,10 @@ function cancellationHtml_(c, reference, k) {
     '<tr><td style="background:' + k.SURFACE + ';border-left:1px solid ' + k.LINE + ';border-right:1px solid ' + k.LINE + ';padding:4px 28px 28px;">' +
       '<div style="border-top:1px solid ' + k.LINE + ';padding-top:22px;">' +
         '<div style="font-family:' + k.SANS + ';font-weight:bold;font-size:10.5px;letter-spacing:0.12em;text-transform:uppercase;color:' + k.SLATE + ';margin-bottom:8px;">Your right to cancel</div>' +
-        p('You can cancel this booking within 14 days without giving a reason, so until <strong style="color:' + k.INK + ';">' + esc(c.deadline) + '</strong>. Reply to this email, WhatsApp us, or use the form below.') +
+        p('You can cancel this booking within 14 days without giving a reason, so until <strong style="color:' + k.INK + ';">' + esc(c.deadline) + '</strong>. ' + esc(cancelHowText_(formAttached, hasButton))) +
         (c.within && c.earlyStart ? p('You asked us to do your clean within those 14 days. If you cancel after we&#8217;ve started, you&#8217;ll pay for the work done up to then. Once the clean is complete, you can no longer cancel.') : '') +
-        p('Full details are in <a href="' + SITE_URL + '/terms.html#cancel" style="color:' + k.TEAL_DEEP + ';font-weight:700;">section 11 of our terms</a>.', 'margin-bottom:16px;') +
+        p('Full details are in <a href="' + SITE_URL + '/terms.html#cancel" style="color:' + k.TEAL_DEEP + ';font-weight:700;">section 11 of our terms</a>.', formAttached ? 'margin-bottom:0;' : 'margin-bottom:16px;') +
+        (formAttached ? '' :
         '<div style="border:1px dashed ' + k.LINE + ';border-radius:4px;padding:16px 18px;background:' + k.PAPER + ';">' +
           '<div style="font-family:' + k.SANS + ';font-weight:bold;font-size:14px;color:' + k.INK + ';margin-bottom:2px;">Cancellation form</div>' +
           '<p style="margin:0 0 12px;font-family:' + k.SANS + ';font-size:12.5px;color:' + k.SLATE + ';">(Only fill in and send this form if you want to cancel.)</p>' +
@@ -831,10 +878,81 @@ function cancellationHtml_(c, reference, k) {
           formLine('Address of consumer(s):') +
           formLine('Signature of consumer(s) (only if this form is sent on paper):') +
           formLine('Date:') +
-        '</div>' +
+        '</div>') +
       '</div>' +
     '</td></tr>'
   );
+}
+
+// FRE-212: the model cancellation form (Schedule 3 of the regulations) as
+// a one-page PDF, attached to a homeowner's confirmation email. A PDF the
+// customer keeps counts as a "durable medium"; a link to a web page
+// wouldn't. Pre-filled with the booking reference, the date they booked,
+// and their name and address, so they only need to sign, date and send it.
+var CANCELLATION_FORM_FILE_PREFIX = "EasyClean-Somerset-cancellation-form-";
+
+function cancellationFormPdf_(c, reference, customer) {
+  var esc = escHtml;
+  customer = customer || {};
+  var address = String(customer.address || "");
+  var postcode = String(customer.postcode || "").trim();
+  if (postcode && address.toUpperCase().replace(/\s/g, "").indexOf(postcode.toUpperCase().replace(/\s/g, "")) === -1) {
+    address += (address ? ", " : "") + postcode.toUpperCase();
+  }
+  var field = function (label, value, tall) {
+    return '<tr><td class="lab">' + label + '</td><td class="val' + (tall ? ' tall' : '') + '">' + (value ? esc(value) : '&nbsp;') + '</td></tr>';
+  };
+  var html =
+    '<html><head><style>' +
+    'body{font-family:Arial,Helvetica,sans-serif;color:#12232B;font-size:12px;line-height:1.5;margin:0;padding:32px;}' +
+    'h1{font-size:20px;margin:0 0 2px;}' +
+    '.muted{color:#5C6F73;}' +
+    '.strong{font-weight:bold;}' +
+    '.label{font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:#5C6F73;margin-bottom:4px;}' +
+    '.layout{width:100%;border-collapse:collapse;margin:0 0 22px;}' +
+    '.layout td{border:none;padding:0;vertical-align:top;}' +
+    '.half{width:50%;}' +
+    '.brand img{width:32px;height:32px;vertical-align:middle;margin-right:8px;}' +
+    '.brand h1{display:inline;vertical-align:middle;}' +
+    '.note{padding:12px 14px;background:#F5F7F6;border-left:3px solid #0E7C86;margin:0 0 22px;}' +
+    'table.form{width:100%;border-collapse:collapse;}' +
+    'table.form td{padding:10px 0;border-bottom:1px solid #DCE3E2;vertical-align:top;}' +
+    'table.form .lab{width:42%;padding-right:16px;color:#5C6F73;}' +
+    'table.form .val{font-weight:bold;}' +
+    'table.form .tall{height:44px;}' +
+    '.foot{margin-top:26px;font-size:11px;color:#5C6F73;}' +
+    '</style></head><body>' +
+    '<table class="layout"><tr>' +
+      '<td class="half">' +
+        '<div class="brand"><img src="' + SITE_URL + '/apple-touch-icon.png" width="32" height="32" alt="" /><h1>Cancellation form</h1></div>' +
+        '<div class="muted">Booking ref ' + esc(reference) + '</div>' +
+      '</td>' +
+      '<td class="half" style="text-align:right;">' +
+        '<div class="strong">' + esc(BUSINESS_NAME) + '</div>' +
+        '<div class="muted">trading as EasyClean Somerset</div>' +
+        '<div class="muted">' + esc(BUSINESS_ADDRESS) + '</div>' +
+        '<div class="muted">' + esc(TRADER_EMAIL) + '</div>' +
+      '</td>' +
+    '</tr></table>' +
+    '<div class="note">' +
+      '<div class="strong">Only fill in and send this form if you want to cancel.</div>' +
+      'You can cancel until <span class="strong">' + esc(c.deadline) + '</span> without giving a reason. ' +
+      'You don&#8217;t have to use this form: a WhatsApp message or a reply to your confirmation email is just as good. ' +
+      'Full details are in section 11 of our terms (' + esc(SITE_URL.replace(/^https?:\/\//, "")) + '/terms.html#cancel).' +
+    '</div>' +
+    '<div class="label">Cancellation form</div>' +
+    '<table class="form">' +
+      field('To', BUSINESS_NAME + ' trading as EasyClean Somerset, ' + BUSINESS_ADDRESS + '. Email: ' + TRADER_EMAIL) +
+      field('I/We hereby give notice that I/We cancel my/our contract for the supply of the following service', 'Cleaning, booking reference ' + reference) +
+      field('Ordered on', c.bookedOn) +
+      field('Name of consumer(s)', customer.name || '') +
+      field('Address of consumer(s)', address) +
+      field('Signature of consumer(s) (only if this form is sent on paper)', '', true) +
+      field('Date', '', true) +
+    '</table>' +
+    '<div class="foot">Send it by email to ' + esc(TRADER_EMAIL) + ', or by post to ' + esc(BUSINESS_ADDRESS) + '.</div>' +
+    '</body></html>';
+  return HtmlService.createHtmlOutput(html).getAs("application/pdf").setName(CANCELLATION_FORM_FILE_PREFIX + reference + ".pdf");
 }
 
 function createBookingLocked_(data) {
@@ -882,6 +1000,9 @@ function createBookingLocked_(data) {
 
   var reference = newBookingReference();
   var jobToken = newJobToken();
+  // The customer's own link for changing or cancelling (FRE-213). Separate
+  // from the job token, so it can never sign off a job.
+  data.manageToken = newJobToken();
   var title = bookingEventTitle_(data);
   // "Job link" is for Niall, not the customer — it's only ever written into
   // this calendar event's own description, never into the customer-facing
@@ -983,7 +1104,18 @@ function sendBookingConfirmation_(data, reference, slotLabel) {
   // Website bookings work this out with the job's time. Admin-app bookings
   // still get the information and form, but never the early-start line.
   var cancel = data.cancellation || cancellationInfo_(data, null, new Date());
+  // FRE-212: homeowners get the cancellation form as a PDF attachment. If it
+  // can't be made, the form goes in the email as before, so they always get it.
+  var formPdf = null;
+  if (cancel) {
+    try {
+      formPdf = cancellationFormPdf_(cancel, reference, data);
+    } catch (pdfErr) {
+      noteProblem_("Cancellation form PDF for " + reference + " (form put in the email instead)", pdfErr);
+    }
+  }
   var askExtras = needsExtrasAsk_(data.notes);
+  var manageUrl = manageLink_(data.manageToken);
   var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" +
     encodeURIComponent("Hi EasyClean Somerset, I need to change my booking. Ref: " + reference);
   // Plain-text fallback — shown by the small number of mail clients that
@@ -998,8 +1130,8 @@ function sendBookingConfirmation_(data, reference, slotLabel) {
     (data.channel === "Agent/Landlord" ? "Access: " + accessEmailText(data) + "\n" : "") + "\n" +
     "Reference: " + reference + ". Keep this handy if you need to get in touch.\n\n" +
     (askExtras ? EXTRAS_ASK_TEXT + "\n\n" : "") +
-    "Need to change anything? Just reply to this email or WhatsApp us: " + waLink + "\n\n" +
-    (cancel ? cancellationText_(cancel, reference) + "\n\n" : "") +
+    changeText_(manageUrl, waLink, "Need to change anything? Just reply to this email or WhatsApp us: ") + "\n\n" +
+    (cancel ? cancellationText_(cancel, reference, !!formPdf, !!manageUrl) + "\n\n" : "") +
     "Thanks,\nEasyClean Somerset";
 
   var htmlBody = buildConfirmationEmailHtml({
@@ -1013,13 +1145,28 @@ function sendBookingConfirmation_(data, reference, slotLabel) {
     waLink: waLink,
     access: data.channel === "Agent/Landlord" ? accessEmailText(data) : "",
     askExtras: askExtras,
-    cancel: cancel
+    cancel: cancel,
+    formAttached: !!formPdf,
+    manageUrl: manageUrl
   });
 
-  sendCustomerEmail_(data.email, "Booking confirmed: " + slotLabel, textBody, {
-    htmlBody: htmlBody,
-    name: "EasyClean Somerset"
-  });
+  var opts = { htmlBody: htmlBody, name: "EasyClean Somerset" };
+  if (formPdf) opts.attachments = [formPdf];
+  sendCustomerEmail_(data.email, "Booking confirmed: " + slotLabel, textBody, opts);
+}
+
+// FRE-212: run this from the Apps Script editor to see a sample homeowner
+// confirmation email, with the cancellation form PDF attached, in your own
+// inbox. Nothing is booked, and nothing is written to the sheet or calendar.
+function sendTestConfirmationEmail() {
+  var me = Session.getEffectiveUser().getEmail();
+  var data = {
+    name: "Test Customer", email: me, address: "1 High Street, Midsomer Norton", postcode: "BA3 2AA",
+    items: "2× Medium room: £90", total: "£90", payment: "Cash", channel: "Consumer", notes: "", earlyStart: true
+  };
+  data.cancellation = cancellationInfo_(data, new Date(Date.now() + 5 * 86400000), new Date());
+  sendBookingConfirmation_(data, "EC-TEST", "Test only, nothing booked");
+  Logger.log("Sent a sample confirmation email to " + me + ".");
 }
 
 // Builds the branded HTML confirmation email. Written the way marketing
@@ -1147,12 +1294,13 @@ function buildConfirmationEmailHtml(d) {
 
         // CTA
         '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:20px 28px 36px;text-align:center;">' +
+          (d.manageUrl ? changeCtaHtml_(d.manageUrl, d.waLink) :
           '<p style="margin:0 0 16px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Need to change anything? Just reply to this email, or message us directly:</p>' +
-          '<a href="' + d.waLink + '" style="display:inline-block;background:' + TEAL + ';color:' + ON_INK + ';font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;text-decoration:none;padding:12px 24px;border-radius:3px;">WhatsApp us</a>' +
+          '<a href="' + d.waLink + '" style="display:inline-block;background:' + TEAL + ';color:' + ON_INK + ';font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;text-decoration:none;padding:12px 24px;border-radius:3px;">WhatsApp us</a>') +
         '</td></tr>' +
 
         // Right to cancel and the cancellation form (homeowners only)
-        (d.cancel ? cancellationHtml_(d.cancel, d.reference, { SANS: SANS, INK: INK, SLATE: SLATE, LINE: LINE, PAPER: PAPER, SURFACE: SURFACE, TEAL_DEEP: TEAL_DEEP }) : '') +
+        (d.cancel ? cancellationHtml_(d.cancel, d.reference, { SANS: SANS, INK: INK, SLATE: SLATE, LINE: LINE, PAPER: PAPER, SURFACE: SURFACE, TEAL_DEEP: TEAL_DEEP }, d.formAttached, !!d.manageUrl) : '') +
 
         // Footer
         '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:24px 28px;text-align:center;">' +
@@ -1292,13 +1440,14 @@ function sendDayBeforeEmail(v, start) {
     (needsExtrasAsk_(v.Notes) ? EXTRAS_ASK_TEXT + "\n\n" : "") +
     "Getting ready: clear small items off the floor, keep pets in another room, and clear a path from the door. A plug socket and water tap nearby helps." +
     (String(v.Items).indexOf("Mattress") !== -1 ? " Please strip the bedding beforehand." : "") +
-    "\n\nNeed to change anything? Reply to this email or WhatsApp us: " + waLink + "\n\nSee you tomorrow,\nEasyClean Somerset";
+    "\n\n" + changeText_(manageLink_(v[MANAGE_TOKEN_COLUMN]), waLink, "Need to change anything? Reply to this email or WhatsApp us: ") + "\n\nSee you tomorrow,\nEasyClean Somerset";
   sendCustomerEmail_(v.Email, "Reminder: we're cleaning for you tomorrow", textBody, {
     htmlBody: buildReminderEmailHtml({
       dayBefore: true, accessNudge: accessNudge, askExtras: needsExtrasAsk_(v.Notes),
       name: name, slotLabel: when, items: v.Items, total: v.Total, payment: v["Payment method"],
       address: v.Address, reference: v.Reference, waLink: waLink,
-      access: isAgent ? v.Access : ""
+      access: isAgent ? v.Access : "",
+      manageUrl: manageLink_(v[MANAGE_TOKEN_COLUMN])
     }),
     name: "EasyClean Somerset"
   });
@@ -1315,7 +1464,7 @@ function sendReminderEmail(v, start) {
     "Total: " + v.Total + " (" + v["Payment method"] + ")\n" +
     "Where: " + v.Address + "\n\n" +
     "Reference: " + v.Reference + "\n\n" +
-    "Need to change anything? Just reply to this email or WhatsApp us: " + waLink + "\n\n" +
+    changeText_(manageLink_(v[MANAGE_TOKEN_COLUMN]), waLink, "Need to change anything? Just reply to this email or WhatsApp us: ") + "\n\n" +
     "See you soon,\nEasyClean Somerset";
 
   sendCustomerEmail_(v.Email, "Reminder: we're cleaning for you today", textBody, {
@@ -1327,7 +1476,8 @@ function sendReminderEmail(v, start) {
       payment: v["Payment method"],
       address: v.Address,
       reference: v.Reference,
-      waLink: waLink
+      waLink: waLink,
+      manageUrl: manageLink_(v[MANAGE_TOKEN_COLUMN])
     }),
     name: "EasyClean Somerset"
   });
@@ -1411,8 +1561,9 @@ function buildReminderEmailHtml(d) {
           (d.dayBefore ? prepChecklistHtml(d.items) : '') +
         '</td></tr>' +
         '<tr><td style="background:' + SURFACE + ';border-left:1px solid ' + LINE + ';border-right:1px solid ' + LINE + ';padding:20px 28px 32px;text-align:center;">' +
+          (d.manageUrl ? changeCtaHtml_(d.manageUrl, d.waLink) :
           '<p style="margin:0 0 16px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Need to change anything? Just reply to this email, or message us directly:</p>' +
-          '<a href="' + d.waLink + '" style="display:inline-block;background:' + TEAL + ';color:' + ON_INK + ';font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;text-decoration:none;padding:12px 24px;border-radius:3px;">WhatsApp us</a>' +
+          '<a href="' + d.waLink + '" style="display:inline-block;background:' + TEAL + ';color:' + ON_INK + ';font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;text-decoration:none;padding:12px 24px;border-radius:3px;">WhatsApp us</a>') +
         '</td></tr>' +
         '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:22px 28px;text-align:center;">' +
           '<div style="font-family:' + SANS + ';font-weight:800;font-size:12.5px;letter-spacing:0.02em;text-transform:uppercase;color:' + SLATE + ';">EasyClean Somerset &middot; Ref ' + esc(d.reference) + '</div>' +
@@ -2366,11 +2517,18 @@ function isPlausibleToken(token) {
 }
 
 function findBookingByToken(token) {
+  return findBookingByTokenColumn_("Job token", token);
+}
+
+// The job token (signing off, admin app) and the manage token (the
+// customer's change-or-cancel link) live in different columns, so one can
+// never be used as the other.
+function findBookingByTokenColumn_(column, token) {
   if (!isPlausibleToken(token)) return null;
   var sheet = getCustomerSheet();
   if (!sheet) return null;
   var data = sheet.getDataRange().getValues();
-  var col = data[0].indexOf("Job token");
+  var col = data[0].indexOf(column);
   if (col === -1) return null;
   for (var i = 1; i < data.length; i++) {
     if (data[i][col] === token) return { rowIndex: i + 1, values: rowToObject(data[0], data[i]) };
@@ -3132,6 +3290,7 @@ function adminCreateBooking(form) {
     var d = built.data;
     var reference = newBookingReference();
     var jobToken = newJobToken();
+    d.manageToken = newJobToken(); // the customer's change-or-cancel link (FRE-213)
     var cal = CalendarApp.getDefaultCalendar();
     cal.createEvent(bookingEventTitle_(d), built.start, built.end, {
       description: bookingEventDescription_(d, reference, adminJobLink(jobToken, reference)),
@@ -3286,6 +3445,352 @@ function sendBookingUpdateEmail_(d, reference, start) {
       htmlBody: buildSimpleEmailHtml({ name: name, heading: "Your booking has been updated", body: body }),
       name: "EasyClean Somerset"
     });
+}
+
+// ============================================================
+// Customers changing or cancelling online (FRE-211, FRE-213)
+// ============================================================
+// Every booking gets a second random token, the "Manage token", separate
+// from the Job token used for signing off. The Change or cancel button in
+// the customer's emails opens my-booking.html?t=<manage token> on the
+// website, which makes the four public calls below. The token only ever
+// shows, moves or cancels that one booking: it can't sign off a job or open
+// the admin app, and the replies hold nothing the customer didn't give us
+// (no email, phone, full address or notes).
+//
+// Rules (FRE-211):
+//   - changes are allowed until the clean starts, never after it's
+//     cancelled or signed off;
+//   - at most MAX_ONLINE_MOVES online moves per booking;
+//   - a new time follows the same rules as a new booking (21 days ahead,
+//     at least 24 hours' notice, no Sundays or closed days, the job's own
+//     length free in the calendar);
+//   - a homeowner moving into their 14-day cancellation period has to tick
+//     the early-start box if they haven't already. The 14 days still run
+//     from the day they booked;
+//   - online cancellations never carry a fee;
+//   - every cancel or move emails the customer and you.
+var MANAGE_TOKEN_COLUMN = "Manage token";
+var ONLINE_MOVES_COLUMN = "Online moves";
+var MAX_ONLINE_MOVES = 2;
+var MANAGE_PAGE_URL = SITE_URL + "/my-booking.html";
+var ONLINE_CANCEL_REASONS = ["Plans changed", "Booked someone else", "Price", "Other"];
+
+function manageLink_(token) {
+  return isPlausibleToken(token) ? MANAGE_PAGE_URL + "?t=" + encodeURIComponent(token) : "";
+}
+
+// The "Need to change anything?" line in plain-text emails.
+function changeText_(manageUrl, waLink, oldLine) {
+  if (!manageUrl) return oldLine + waLink;
+  return "Need to change or cancel? Do it online: " + manageUrl + "\nOr reply to this email, or WhatsApp us: " + waLink;
+}
+
+// The button pair for the confirmation and reminder emails.
+function changeCtaHtml_(manageUrl, waLink) {
+  var SANS = "Arial,Helvetica,sans-serif", TEAL = "#0E7C86", ON_INK = "#F5F7F6", SLATE = "#5C6F73";
+  var btn = "display:inline-block;font-family:'Public Sans'," + SANS + ";font-weight:700;font-size:14.5px;text-decoration:none;border-radius:3px;margin:0 4px 8px;";
+  return '<p style="margin:0 0 16px;font-family:' + SANS + ';font-size:14px;color:' + SLATE + ';">Need to change or cancel? Do it online, reply to this email, or message us:</p>' +
+    '<a href="' + escHtml(manageUrl) + '" style="' + btn + 'background:' + TEAL + ';color:' + ON_INK + ';padding:12px 24px;border:2px solid ' + TEAL + ';">Change or cancel</a>' +
+    '<a href="' + waLink + '" style="' + btn + 'background:#FFFFFF;color:' + TEAL + ';padding:12px 24px;border:2px solid ' + TEAL + ';">WhatsApp us</a>';
+}
+
+// The booking, its calendar event and start time, or null.
+function loadManagedBooking_(token) {
+  var row = findBookingByTokenColumn_(MANAGE_TOKEN_COLUMN, token);
+  if (!row) return null;
+  var ev = findBookingEvent_(row.values.Reference);
+  return { row: row, v: row.values, ev: ev, start: ev ? ev.getStartTime() : null, end: ev ? ev.getEndTime() : null };
+}
+
+// Why this booking can't be changed online, or null if it can.
+function notChangeableReason_(b, now) {
+  var v = b.v;
+  if (v["Cancelled at"]) return "cancelled";
+  if (v["Completed at"]) return "completed";
+  if (validDate_(v["Started at"])) return "started";
+  if (b.start && b.start.getTime() <= now.getTime()) return "started";
+  return null;
+}
+
+function onlineMovesSoFar_(v) {
+  var n = parseInt(v[ONLINE_MOVES_COLUMN], 10);
+  return n > 0 ? n : 0;
+}
+
+function jobLengthMins_(b) {
+  return b.start && b.end ? Math.round((b.end.getTime() - b.start.getTime()) / 60000) : SLOT_MINS;
+}
+
+// A homeowner's last day to cancel (yyyy-MM-dd), 14 days from the day they
+// booked, worked out the same way as the confirmation email. Null for
+// agents, or if the booking date can't be read.
+function cancelDeadlineIso_(v) {
+  if (v.Channel === "Agent/Landlord") return null;
+  var booked = validDate_(v.Timestamp);
+  if (!booked) return null;
+  var p = Utilities.formatDate(booked, TIMEZONE, "yyyy-MM-dd").split("-");
+  var lastDay = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] + CANCEL_DAYS, 12));
+  return Utilities.formatDate(lastDay, TIMEZONE, "yyyy-MM-dd");
+}
+
+function earlyStartGiven_(v) {
+  return /^Yes/.test(String(v["Early start request"] || ""));
+}
+
+// "Mon 12 Oct at 9:00am"
+function whenLabel_(d) {
+  return Utilities.formatDate(d, TIMEZONE, "EEE d MMM 'at' h:mma").replace("AM", "am").replace("PM", "pm");
+}
+
+// First line of the address and the postcode district: "12 Ivy Walk, BA3".
+function shortAddress_(address) {
+  var a = String(address || "").trim();
+  var first = a.split(",")[0].trim();
+  var m = /\b([A-Z]{1,2}\d[A-Z\d]?)\s*\d[A-Z]{2}\s*$/i.exec(a);
+  if (!m) return first;
+  var district = m[1].toUpperCase();
+  return first.toUpperCase().replace(/\s/g, "").indexOf(district) === 0 ? district : first + ", " + district;
+}
+
+// "2× Medium room: £90, 1× Armchair: £15" -> [{ name, qty }]
+function publicItems_(items) {
+  return String(items || "").split(", ").filter(function (x) { return x; }).map(function (part) {
+    var cut = part.lastIndexOf(": ");
+    var left = (cut === -1 ? part : part.slice(0, cut)).trim();
+    var m = /^(\d+)\s*[×x]\s*(.+)$/.exec(left);
+    return m ? { name: m[2].trim(), qty: parseInt(m[1], 10) } : { name: left, qty: 1 };
+  });
+}
+
+// GET ?action=booking&t=...
+function getPublicBooking(token) {
+  var b = loadManagedBooking_(token);
+  if (!b) return { ok: false, error: "not_found" };
+  var v = b.v;
+  var reason = notChangeableReason_(b, new Date());
+  var isAgent = v.Channel === "Agent/Landlord";
+  var plain = function (x) { return x instanceof Date ? fmtWhen(x) : String(x === undefined || x === null ? "" : x); };
+  var est = parseInt(v["Est. mins"], 10);
+  return {
+    ok: true,
+    reference: plain(v.Reference),
+    channel: isAgent ? "agent" : "homeowner",
+    date: b.start ? Utilities.formatDate(b.start, TIMEZONE, "yyyy-MM-dd") : "",
+    time: b.start ? Utilities.formatDate(b.start, TIMEZONE, "HH:mm") : "",
+    whenLabel: b.start ? whenLabel_(b.start) : bookingTimeText(v),
+    addressShort: shortAddress_(plain(v.Address)),
+    items: publicItems_(plain(v.Items)),
+    total: plain(v.Total),
+    estMins: est > 0 ? est : jobLengthMins_(b),
+    // No calendar event (deleted by hand): the page says to message us.
+    canChange: !reason && !!b.start,
+    notChangeableReason: reason,
+    movesLeft: Math.max(0, MAX_ONLINE_MOVES - onlineMovesSoFar_(v)),
+    cancelDeadline: isAgent ? null : cancelDeadlineIso_(v),
+    earlyStartGiven: isAgent ? false : earlyStartGiven_(v)
+  };
+}
+
+// GET ?action=rescheduleSlots&t=... Same shape as ?action=slots.
+function getRescheduleSlots(token) {
+  var b = loadManagedBooking_(token);
+  if (!b) return { ok: false, error: "not_found" };
+  var reason = notChangeableReason_(b, new Date());
+  if (reason) return { ok: false, error: reason };
+  if (!b.start) return { ok: false, error: "not_found" };
+  if (onlineMovesSoFar_(b.v) >= MAX_ONLINE_MOVES) return { ok: false, error: "no_moves_left" };
+  var slots = computeSlots_({ ignoreReference: b.v.Reference, lengthMins: jobLengthMins_(b), skipStartMs: b.start.getTime() });
+  slots.forEach(function (s) { s.timeLabel = s.timeLabel.replace("AM", "am").replace("PM", "pm"); });
+  return { ok: true, slots: slots };
+}
+
+// POST { action: "cancel", t, reason }
+function cancelBookingPublic(data) {
+  data = data || {};
+  if (!isPlausibleToken(data.t)) return { ok: false, error: "not_found" };
+  var reasonText = ONLINE_CANCEL_REASONS.indexOf(data.reason) !== -1 ? data.reason : "";
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { return { ok: false, error: "busy" }; }
+  try {
+    var b = loadManagedBooking_(data.t);
+    if (!b) return { ok: false, error: "not_found" };
+    var now = new Date();
+    var why = notChangeableReason_(b, now);
+    if (why) return { ok: false, error: why };
+    var v = b.v;
+    var whenStr = b.start ? fmtWhen(b.start) : bookingTimeText(v);
+    var late = !!b.start && isLateCancellation(b.start, now);
+    var res = cancelJobLocked_(v["Job token"], {
+      row: b.row,
+      reason: "customer",
+      cancelledBy: "Customer (online" + (reasonText ? ": " + reasonText : "") + ")",
+      note: "Cancelled by the customer with the link in their emails.",
+      emailCustomer: false,
+      chargeFee: false
+    });
+    if (!res.ok) throw new Error(res.error || "cancel failed");
+
+    if (v.Email) {
+      try {
+        sendCancellationEmail(v, "online", whenStr, null, now);
+      } catch (err) {
+        noteProblem_("Online cancellation email failed for " + v.Reference, err);
+        notifyOwner("Cancellation email failed for " + v.Reference,
+          "The customer cancelled online and the booking is cancelled, but the email confirming it didn't send (" + err + "). " +
+          "The law asks us to confirm an online cancellation in writing, so please email or message them.");
+      }
+    }
+    notifyOwner("Cancelled online: " + v.Reference + ", " + whenStr, [
+      (v["Business name"] && v.Channel === "Agent/Landlord" ? v.Name + " (" + v["Business name"] + ")" : v.Name) + " cancelled their booking using the link in their emails.",
+      "",
+      "Was: " + whenStr,
+      "Where: " + v.Address,
+      "What: " + v.Items + " (" + v.Total + ")",
+      "Reason given: " + (reasonText || "none"),
+      late ? "Notice: less than 24 hours. Online cancellations never carry a fee." : null,
+      "",
+      "The time is free again on the website. " + (v.Email ? "They've been emailed to confirm." : "They have no email address, so nothing was sent to them.")
+    ].filter(function (x) { return x !== null; }).join("\n"));
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// POST { action: "reschedule", t, date: "yyyy-MM-dd", time: "HH:mm", earlyStart }
+function rescheduleBookingPublic(data) {
+  data = data || {};
+  if (!isPlausibleToken(data.t)) return { ok: false, error: "not_found" };
+  var day = parseIsoDate_(data.date), hm = parseHhmm_(data.time);
+  if (!day || !hm) return { ok: false, error: "slot_taken" };
+  var newStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), hm.h, hm.m);
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { return { ok: false, error: "busy" }; }
+  try {
+    var b = loadManagedBooking_(data.t);
+    if (!b) return { ok: false, error: "not_found" };
+    var now = new Date();
+    var why = notChangeableReason_(b, now);
+    if (why) return { ok: false, error: why };
+    if (!b.start) return { ok: false, error: "not_found" };
+    var v = b.v;
+    var reply = function (d) {
+      return { ok: true, date: Utilities.formatDate(d, TIMEZONE, "yyyy-MM-dd"), time: Utilities.formatDate(d, TIMEZONE, "HH:mm"), whenLabel: whenLabel_(d) };
+    };
+    if (newStart.getTime() === b.start.getTime()) return reply(b.start); // nothing to move
+    var moves = onlineMovesSoFar_(v);
+    if (moves >= MAX_ONLINE_MOVES) return { ok: false, error: "no_moves_left" };
+
+    var newEnd = new Date(newStart.getTime() + jobLengthMins_(b) * 60000);
+    if (!isOfferableSlot(newStart) || clashesFor_(newStart, newEnd, b.ev).length) return { ok: false, error: "slot_taken" };
+
+    var newDay = Utilities.formatDate(newStart, TIMEZONE, "yyyy-MM-dd");
+    var deadline = v.Channel === "Agent/Landlord" ? null : cancelDeadlineIso_(v);
+    var newlyGiven = false;
+    if (deadline && newDay <= deadline && !earlyStartGiven_(v)) {
+      if (data.earlyStart !== true) return { ok: false, error: "needs_early_start" };
+      newlyGiven = true;
+    }
+
+    var oldStart = b.start;
+    b.ev.setTime(newStart, newEnd);
+    var dayChanged = Utilities.formatDate(oldStart, TIMEZONE, "yyyy-MM-dd") !== newDay;
+
+    var entry = Utilities.formatDate(now, TIMEZONE, "d MMM") + ": moved online by customer from " + fmtWhen(oldStart) + " to " + fmtWhen(newStart);
+    try {
+      var sheet = getCustomerSheet();
+      var header = ensureColumns(sheet, ["Changes", ONLINE_MOVES_COLUMN, "Early start request"]);
+      var log = String(v.Changes || "");
+      var writes = { "Booking time": fmtWhen(newStart), "Changes": (log ? log + "; " : "") + entry };
+      writes[ONLINE_MOVES_COLUMN] = moves + 1;
+      if (newlyGiven) writes["Early start request"] = "Yes, ticked when moving online";
+      // A job moved to another day gets its reminders again on the new dates.
+      if (dayChanged) {
+        if (header.indexOf("Day-before reminder sent") !== -1) writes["Day-before reminder sent"] = "";
+        if (header.indexOf("Day-of reminder sent") !== -1) writes["Day-of reminder sent"] = "";
+      }
+      setRowValues_(sheet, b.row.rowIndex, header, writes);
+    } catch (sheetErr) {
+      noteProblem_("Recording an online move failed for " + v.Reference, sheetErr);
+      notifyOwner("Customer sheet not updated for " + v.Reference,
+        "The customer moved their booking online and the calendar now shows " + fmtWhen(newStart) + ", but the customer sheet couldn't be updated (" + sheetErr + "). " +
+        "Update Booking time and Changes by hand.");
+    }
+    try { refreshSlotsCache(); } catch (err) { noteProblem_("Refreshing available times after an online move failed", err); }
+
+    if (v.Email) {
+      try {
+        sendBookingMovedEmail_(v, oldStart, newStart);
+      } catch (err) {
+        noteProblem_("'Booking moved' email failed for " + v.Reference, err);
+      }
+    }
+    notifyOwner("Moved online: " + v.Reference + " to " + fmtWhen(newStart), [
+      (v["Business name"] && v.Channel === "Agent/Landlord" ? v.Name + " (" + v["Business name"] + ")" : v.Name) + " moved their booking using the link in their emails.",
+      "",
+      "From: " + fmtWhen(oldStart),
+      "To: " + fmtWhen(newStart),
+      "Where: " + v.Address,
+      "What: " + v.Items + " (" + v.Total + ")",
+      newlyGiven ? "They ticked the box asking us to clean within their 14-day cancellation period." : null,
+      "Online moves used: " + (moves + 1) + " of " + MAX_ONLINE_MOVES + ".",
+      "",
+      "Your calendar is updated. " + (v.Email ? "They've been emailed the new time." : "They have no email address, so nothing was sent to them.")
+    ].filter(function (x) { return x !== null; }).join("\n"));
+    return reply(newStart);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function sendBookingMovedEmail_(v, oldStart, newStart) {
+  var isAgent = v.Channel === "Agent/Landlord";
+  var name = isAgent ? (v.Name || v["Business name"]) : v.Name;
+  var manageUrl = manageLink_(v[MANAGE_TOKEN_COLUMN]);
+  var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" +
+    encodeURIComponent("Hi EasyClean Somerset, about my booking. Ref: " + v.Reference);
+  var moved = "Your booking (ref " + v.Reference + ") has moved from " + fmtWhen(oldStart) + " to " + fmtWhen(newStart) + ".";
+  var details = "What: " + v.Items + ". Total: " + v.Total + ". Where: " + v.Address + ".";
+  var help = "Need to change it again, or cancel? " + (manageUrl ? "Use the button below, reply to this email, or" : "Reply to this email, or");
+  var text = "Hi " + name + ",\n\n" + moved + "\n\n" + details + "\n\n" +
+    (manageUrl ? "Need to change it again, or cancel? Do it online: " + manageUrl + "\nOr reply to this email, or WhatsApp us: " + waLink
+               : "Need to change it again, or cancel? Reply to this email or WhatsApp us: " + waLink) +
+    "\n\nThanks,\nEasyClean Somerset";
+  sendCustomerEmail_(v.Email, "Booking moved: " + fmtWhen(newStart) + " (" + v.Reference + ")", text, {
+    htmlBody: buildSimpleEmailHtml({
+      name: name,
+      heading: "Your booking has moved",
+      paragraphs: [{ text: moved }, { text: details }, { text: help, link: { label: "message us on WhatsApp", url: waLink } }],
+      button: manageUrl ? { text: "Change or cancel", url: manageUrl } : null
+    }),
+    name: "EasyClean Somerset"
+  });
+}
+
+/**
+ * Run once after pasting the FRE-213 version (function dropdown -> Run).
+ * Gives every booking that isn't cancelled or signed off a manage token, so
+ * its next reminder email has the Change or cancel button. Safe to run again.
+ */
+function setUpManageTokens() {
+  var sheet = getCustomerSheet();
+  if (!sheet) { Logger.log("Customer sheet not set up."); return; }
+  var header = ensureColumns(sheet, [MANAGE_TOKEN_COLUMN]);
+  var col = header.indexOf(MANAGE_TOKEN_COLUMN);
+  var data = sheet.getDataRange().getValues();
+  var refCol = header.indexOf("Reference"), cancelCol = header.indexOf("Cancelled at"), doneCol = header.indexOf("Completed at");
+  var added = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (!data[i][refCol] || data[i][col]) continue;
+    if ((cancelCol !== -1 && data[i][cancelCol]) || (doneCol !== -1 && data[i][doneCol])) continue;
+    var cell = sheet.getRange(i + 1, col + 1);
+    cell.setNumberFormat("@");
+    cell.setValue(newJobToken());
+    added++;
+  }
+  Logger.log("Manage tokens added to " + added + " booking(s).");
+  return added;
 }
 
 // ---- Time off: blocking days or hours from the admin app ----
@@ -3810,8 +4315,10 @@ function adminCancelJob(token, opts) {
   }
 }
 
+// opts.row: the booking row already looked up (online cancellations find it
+// by the manage token). opts.cancelledBy: overrides the "Cancelled by" text.
 function cancelJobLocked_(token, opts) {
-  var row = findBookingByToken(token);
+  var row = opts.row || findBookingByToken(token);
   if (!row) return { ok: false, error: "not_found" };
   var v = row.values;
   if (v["Cancelled at"]) return { ok: true, alreadyCancelled: true };
@@ -3835,7 +4342,7 @@ function cancelJobLocked_(token, opts) {
   var header = ensureColumns(sheet, CANCELLATION_COLUMNS.concat(COMPLETION_COLUMNS));
   var writes = {
     "Cancelled at": now,
-    "Cancelled by": CANCEL_REASONS[opts.reason] + (late ? " (less than 24 hours' notice)" : ""),
+    "Cancelled by": (opts.cancelledBy || CANCEL_REASONS[opts.reason]) + (late ? " (less than 24 hours' notice)" : ""),
     "Cancellation note": String(opts.note || "").slice(0, 500)
   };
 
@@ -3915,7 +4422,7 @@ function buildCancellationFeeInvoice(v, reason, whenStr, now) {
   return { amount: amount, invoiceNumber: invoiceNumber, inv: inv, blob: blob, url: url };
 }
 
-function sendCancellationEmail(v, reason, whenStr, fee) {
+function sendCancellationEmail(v, reason, whenStr, fee, at) {
   var isAgent = v.Channel === "Agent/Landlord";
   var name = isAgent ? (v.Name || v["Business name"]) : v.Name;
   var what = "your booking" + (whenStr ? " for " + whenStr : "") + " at " + v.Address + " (ref " + v.Reference + ")";
@@ -3923,6 +4430,13 @@ function sendCancellationEmail(v, reason, whenStr, fee) {
   if (reason === "us") {
     heading = "We've had to cancel your booking";
     body = "Sorry, we've had to cancel " + what + ". There's nothing to pay. We'll be in touch to find a new time, or you can rebook online at easycleansomerset.co.uk whenever suits.";
+  } else if (reason === "online") {
+    // The written acknowledgement the regulations ask for when someone
+    // cancels through our website (FRE-213). Online cancellations never
+    // carry a fee.
+    heading = "Your booking is cancelled";
+    body = "We've received your cancellation, made online on " + fmtWhen(at || new Date()) + ". " +
+      "Your booking" + (whenStr ? " for " + whenStr : "") + " at " + v.Address + " (ref " + v.Reference + ") is cancelled, and there's nothing to pay.";
   } else if (reason === "noaccess") {
     heading = "We couldn't get in today";
     body = "We weren't able to get into the property for " + what + ", so the booking has been cancelled.";

@@ -40,6 +40,11 @@ Check these before changing either side.
   - **Where prices change:** in `_data/prices.yml`.
 - **Service area:** Code.gs reads `service-area.js` and expects the `window.EC_SERVICE_AREA = [ "BA1", ... ];` format.
 - **Sign-off page:** `job-complete.html` uses `GET ?action=job&t=<token>` and `POST { action: "complete", ... }`.
+- **Change or cancel page (FRE-211):** `my-booking.html?t=<manage token>` is linked from the Change or cancel button in the confirmation, day-before, morning-of and "booking moved" emails. The manage token is its own column (`Manage token`), separate from the job token, so it can't sign off a job.
+  - `GET ?action=booking&t=` returns `{ ok, reference, channel: "homeowner"|"agent", date, time, whenLabel, addressShort, items: [{ name, qty }], total, estMins, canChange, notChangeableReason, movesLeft, cancelDeadline, earlyStartGiven }`. Nothing private: no email, phone, full address or notes.
+  - `GET ?action=rescheduleSlots&t=` returns the same shape as `?action=slots`, for this job's length, with its own time not counted as busy.
+  - `POST { action: "cancel", t, reason }` and `POST { action: "reschedule", t, date: "yyyy-MM-dd", time: "HH:mm", earlyStart }` return `{ ok }` or an error: `not_found`, `cancelled`, `completed`, `started`, `slot_taken`, `needs_early_start`, `no_moves_left`, `busy`, `server_error`.
+  - **Rules:** changes until the clean starts; at most 2 online moves (`MAX_ONLINE_MOVES`); a new time follows the booking rules; a homeowner moving into their 14 days must tick the early-start box; online cancellations never carry a fee. `cancel` reasons are only kept if they're one of the page's four buttons.
 - **WhatsApp number:** `WHATSAPP_NUMBER` in Code.gs must match the one in `booking.js`.
 
 ## Morning check
@@ -60,10 +65,20 @@ All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any o
 ## Tests
 
 - `node _tests/backend.test.js` runs `Code.gs` in Node with Google's services faked (`_tests/fake-google.js`). It needs no setup.
+- `node _tests/change-or-cancel.test.js` checks the change-or-cancel calls, emails and rules (FRE-213). It needs no setup.
+- `node _tests/cancellation-form.test.js` checks the homeowner confirmation email and its cancellation form PDF (FRE-212). It needs no setup.
 - `node _tests/dashboard.test.js` drives `Dashboard.html` in a browser against the same fake, so the page and `Code.gs` are checked together. It needs the Playwright setup from `booking.test.js`.
 - These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
 
 ## Last updated
+
+8 October 2026 (later):
+
+- Customers can change or cancel online (FRE-213, with the website page from FRE-214). New sheet columns: `Manage token` and `Online moves`. Every cancel or move emails the customer and Niall, and is written in `Changes` or `Cancelled by` ("Customer (online: reason)"). The confirmation, day-before and morning-of emails get a Change or cancel button next to WhatsApp. Run `setUpManageTokens` once so open bookings get the button in their reminders. `Code.gs` only.
+
+8 October 2026:
+
+- The model cancellation form now goes out as a PDF attached to homeowner confirmation emails (`cancellationFormPdf_`), pre-filled with the reference, booking date, name and address. The email keeps a short right-to-cancel section. If the PDF can't be made, the form goes in the email as before and the problem log notes it (FRE-212). Run `sendTestConfirmationEmail` to get a sample in your own inbox. `Code.gs` only.
 
 7 October 2026:
 
