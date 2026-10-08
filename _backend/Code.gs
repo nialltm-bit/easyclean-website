@@ -453,7 +453,8 @@ function setUpCustomerSheet() {
 function appendCustomerRow(data, reference, slotLabel, jobToken) {
   var sheet = getCustomerSheet();
   if (!sheet) return; // setUpCustomerSheet() hasn't been run yet
-  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", "Early start request", "Est. mins", MANAGE_TOKEN_COLUMN]);
+  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", "Early start request", "Est. mins", MANAGE_TOKEN_COLUMN,
+    "Starts at", "Ends at", REQUEST_ID_COLUMN]);
   var byHeader = {
     "Timestamp": new Date(),
     "Reference": reference,
@@ -481,7 +482,13 @@ function appendCustomerRow(data, reference, slotLabel, jobToken) {
     // timer can show actual against estimate (FRE-194).
     "Est. mins": parseMinsText_(data.estTime) || "",
     // The customer's change-or-cancel link (FRE-213).
-    "Manage token": data.manageToken || ""
+    "Manage token": data.manageToken || "",
+    // The booking's time, kept here as well as in the calendar, so a job
+    // never drops out of the admin app (FRE-203).
+    "Starts at": data.startsAt || "",
+    "Ends at": data.endsAt || "",
+    // The page's one-time ID for this booking, so a retry can't book twice.
+    "Request ID": data.requestId || ""
     // Completed at / Signature link / Invoice number are deliberately not
     // set here — completeJob() fills those in later, once the job's signed
     // off, the same way it already looks its columns up by header name.
@@ -659,6 +666,7 @@ function createBooking(data) {
   }
   var badInput = validateBookingInput(data);
   if (badInput) return { ok: false, error: badInput };
+  data.requestId = cleanRequestId_(data.requestId);
   data.notes = websiteBookingNotes_(data);
   var rate = bookingRateExceeded();
   if (rate) {
@@ -675,6 +683,10 @@ function createBooking(data) {
     return { ok: false, error: "busy" };
   }
   try {
+    // The same booking sent again (the page retrying after a dropped
+    // connection): answer with the booking already made, never a second one.
+    var earlier = data.requestId ? bookingForRequestId_(data.requestId) : null;
+    if (earlier) return { ok: true, reference: earlier, repeat: true };
     var result = createBookingLocked_(data);
     if (result && result.ok) countBooking();
     return result;
@@ -924,6 +936,8 @@ function createBookingLocked_(data) {
   // Niall instead (the page may have been opened before the box was added).
   data.cancellation = cancellationInfo_(data, start, new Date());
   var end = new Date(start.getTime() + SLOT_MINS * 60000);
+  data.startsAt = start;
+  data.endsAt = end;
   var cal = CalendarApp.getDefaultCalendar();
 
   // Re-price from the live price list. The browser's own items/total/time
@@ -958,6 +972,7 @@ function createBookingLocked_(data) {
     description: description,
     location: data.address
   });
+  rememberRequestId_(data.requestId, reference);
 
   // Update the cached slot list right away so this slot stops being offered
   // to the next visitor immediately, rather than waiting for the next
@@ -2613,22 +2628,6 @@ function plainForPage(obj) {
   return out;
 }
 
-// Calendar start time for one booking, so a single job (opened from a
-// calendar link or a search) shows a proper date and time too.
-function calendarStartFor(reference) {
-  try {
-    var now = new Date();
-    var events = CalendarApp.getDefaultCalendar()
-      .getEvents(new Date(now.getTime() - 60 * 86400000), new Date(now.getTime() + 60 * 86400000));
-    for (var i = 0; i < events.length; i++) {
-      if (referenceFromEvent(events[i]) === reference) return events[i].getStartTime();
-    }
-  } catch (err) {
-    noteProblem_("Calendar lookup failed for " + reference, err);
-  }
-  return null;
-}
-
 function adminGetOverview() {
   requireOwner();
   var sheet = getCustomerSheet();
@@ -2638,31 +2637,44 @@ function adminGetOverview() {
   var data = sheet.getDataRange().getValues();
   var header = data[0];
 
-  // Booking start times come from the calendar (the sheet only has a label).
-  // A booking whose event has been deleted (cancelled) won't appear in the
-  // job lists, but can still be found by reference search.
+  // Each booking's time is kept in the sheet ("Starts at"), so a job stays in
+  // these lists however long ago it was, and even if its calendar event was
+  // deleted by hand (it shows as "Not in calendar"). When both are there the
+  // calendar wins, since that's where times get moved (FRE-203).
   var now = new Date();
-  var starts = {};
-  CalendarApp.getDefaultCalendar()
-    .getEvents(new Date(now.getTime() - 30 * 86400000), new Date(now.getTime() + 30 * 86400000))
-    .forEach(function (ev) {
-      var ref = referenceFromEvent(ev);
-      if (ref) starts[ref] = ev.getStartTime();
-    });
+  var earliest = now.getTime() - 60 * 86400000;
+  var i, v;
+  for (i = 1; i < data.length; i++) {
+    v = rowToObject(header, data[i]);
+    if (!v.Reference || v["Completed at"] || v["Cancelled at"]) continue;
+    var saved = sheetStart_(v);
+    if (saved && saved.getTime() - 86400000 < earliest) earliest = saved.getTime() - 86400000;
+  }
+  var events = bookingEventsByRef_(new Date(earliest), new Date(now.getTime() + 400 * 86400000));
 
   var todayKey = dayKey(now);
   var today = [], waiting = [], upcoming = [], unpaid = [], recentlyPaid = [];
-  for (var i = 1; i < data.length; i++) {
-    var v = rowToObject(header, data[i]);
+  for (i = 1; i < data.length; i++) {
+    v = rowToObject(header, data[i]);
     if (!v.Reference) continue;
-    var start = starts[v.Reference] || null;
+    var open = !v["Completed at"] && !v["Cancelled at"];
+    var ev = open ? events[v.Reference] || null : null;
+    if (ev) syncBookingTimes_(sheet, i + 1, v, ev);
+    var start = ev ? ev.getStartTime() : (open ? sheetStart_(v) : null);
     var job = adminJobSummary(v, start);
-    if (!v["Completed at"] && start) {
-      var k = dayKey(start);
-      job._sort = start.getTime();
-      if (k === todayKey) today.push(job);
-      else if (k < todayKey) waiting.push(job);
-      else upcoming.push(job);
+    if (open) {
+      if (!ev) job.calendarMissing = true;
+      if (!start) {
+        // An older booking with no saved time and no event: needs a look.
+        job._sort = 0;
+        waiting.push(job);
+      } else {
+        var k = dayKey(start);
+        job._sort = start.getTime();
+        if (k === todayKey) today.push(job);
+        else if (k < todayKey) waiting.push(job);
+        else if (start.getTime() - now.getTime() <= 30 * 86400000) upcoming.push(job);
+      }
     }
     if (v["Payment due"] && !v["Paid on"]) {
       job._sort = v["Payment due"] instanceof Date ? v["Payment due"].getTime() : 0;
@@ -2687,10 +2699,12 @@ function adminGetJob(token) {
   requireOwner();
   var row = findBookingByToken(token);
   if (!row) return { ok: false, error: "not_found" };
-  var start = calendarStartFor(row.values.Reference);
+  var t = bookingTimes_(row);
+  var start = t.start;
   var job = adminJobSummary(row.values, start);
   job.ok = true;
-  job.hasCalendarEvent = !!start;
+  job.hasCalendarEvent = !!t.ev;
+  job.hasSavedTime = !!sheetStart_(row.values);
   job.lateNotice = !!start && isLateCancellation(start, new Date());
   job.feeAmount = "£" + LATE_CANCELLATION_FEE;
   addTimingAndPhotos_(job, row);
@@ -2711,7 +2725,7 @@ function adminSearch(query) {
   for (var i = data.length - 1; i >= 1 && results.length < 20; i--) {
     var v = rowToObject(data[0], data[i]);
     var hay = [v.Reference, v.Name, v["Business name"], v.Address].join(" ").toLowerCase();
-    if (hay.indexOf(q) !== -1) results.push(adminJobSummary(v, null));
+    if (hay.indexOf(q) !== -1) results.push(adminJobSummary(v, sheetStart_(v)));
   }
   return { ok: true, results: results };
 }
@@ -2805,7 +2819,7 @@ function estMinsFor_(v) {
   var stored = parseInt(v["Est. mins"], 10);
   if (stored > 0) return stored;
   try {
-    var ev = findBookingEvent_(v.Reference);
+    var ev = findBookingEvent_(v.Reference, sheetStart_(v));
     var m = ev && /^Est\. time:\s*(.*)$/m.exec(ev.getDescription() || "");
     return m ? parseMinsText_(m[1]) : null;
   } catch (err) {
@@ -3117,12 +3131,209 @@ function buildAdminBooking_(f) {
 }
 
 // The calendar event for a booking, or null if it's been deleted.
-function findBookingEvent_(reference) {
+// hintStart (the time saved in the sheet) is checked first, which is quick
+// and works for jobs of any age; then a wide window, in case the event was
+// dragged to another day in the calendar.
+function findBookingEvent_(reference, hintStart) {
+  var cal = CalendarApp.getDefaultCalendar();
+  var pick = function (events) {
+    for (var i = 0; i < events.length; i++) {
+      if (referenceFromEvent(events[i]) === reference) return events[i];
+    }
+    return null;
+  };
+  if (hintStart) {
+    var near = pick(cal.getEvents(new Date(hintStart.getTime() - 86400000), new Date(hintStart.getTime() + 86400000)));
+    if (near) return near;
+  }
   var now = new Date();
-  var events = CalendarApp.getDefaultCalendar()
-    .getEvents(new Date(now.getTime() - 120 * 86400000), new Date(now.getTime() + 365 * 86400000));
-  for (var i = 0; i < events.length; i++) {
-    if (referenceFromEvent(events[i]) === reference) return events[i];
+  var from = now.getTime() - 120 * 86400000;
+  if (hintStart && hintStart.getTime() - 86400000 < from) from = hintStart.getTime() - 86400000;
+  return pick(cal.getEvents(new Date(from), new Date(now.getTime() + 400 * 86400000)));
+}
+
+// ---- Booking times kept in the sheet (FRE-203) ----
+// The calendar is still where a booking's time is set and moved. Its start
+// and end are copied into the sheet as well ("Starts at", "Ends at"), so a
+// job never drops out of the admin app because its event is old or was
+// deleted by hand, and so it can be put back in the calendar if it was.
+var START_COLUMNS = ["Starts at", "Ends at"];
+
+// A job done this many days ago and still not signed off is in the morning
+// check, since it hasn't been invoiced.
+var SIGNOFF_NUDGE_DAYS = 3;
+
+function sheetStart_(v) { return validDate_(v["Starts at"]); }
+function sheetEnd_(v) { return validDate_(v["Ends at"]); }
+
+// Every booking event in a window, by reference (one calendar lookup).
+function bookingEventsByRef_(from, to) {
+  var out = {};
+  CalendarApp.getDefaultCalendar().getEvents(from, to).forEach(function (ev) {
+    var ref = referenceFromEvent(ev);
+    if (ref && !out[ref]) out[ref] = ev;
+  });
+  return out;
+}
+
+// Copies the event's time into the sheet when they differ (a new booking
+// from before this version, or one dragged to a new time in the calendar).
+function syncBookingTimes_(sheet, rowIndex, v, ev) {
+  var start = ev.getStartTime(), end = ev.getEndTime();
+  var savedStart = sheetStart_(v), savedEnd = sheetEnd_(v);
+  if (savedStart && savedEnd && savedStart.getTime() === start.getTime() && savedEnd.getTime() === end.getTime()) return;
+  try {
+    var header = ensureColumns(sheet, START_COLUMNS);
+    setRowValues_(sheet, rowIndex, header, { "Starts at": start, "Ends at": end });
+    v["Starts at"] = start;
+    v["Ends at"] = end;
+  } catch (err) {
+    noteProblem_("Saving the booking time in the sheet failed for " + v.Reference, err);
+  }
+}
+
+// One booking's event and times. Open bookings get their sheet times
+// brought up to date from the calendar on the way.
+function bookingTimes_(row) {
+  var v = row.values;
+  var saved = sheetStart_(v);
+  var ev = null;
+  try {
+    ev = findBookingEvent_(v.Reference, saved);
+  } catch (err) {
+    noteProblem_("Calendar lookup failed for " + v.Reference, err);
+  }
+  if (ev && !v["Completed at"] && !v["Cancelled at"]) syncBookingTimes_(getCustomerSheet(), row.rowIndex, v, ev);
+  return { ev: ev, start: ev ? ev.getStartTime() : saved, end: ev ? ev.getEndTime() : sheetEnd_(v) };
+}
+
+// The details a calendar event needs, read back from a booking's row.
+function bookingDataFromRow_(v) {
+  var plain = function (x) { return x === undefined || x === null ? "" : String(x); };
+  var isAgent = v.Channel === "Agent/Landlord";
+  var mins = parseInt(v["Est. mins"], 10);
+  return {
+    channel: isAgent ? "Agent/Landlord" : "Consumer",
+    name: plain(v.Name),
+    businessName: plain(v["Business name"]) || plain(v.Name),
+    items: plain(v.Items),
+    total: plain(v.Total),
+    estTime: mins > 0 ? "~" + formatMinsServer(mins) : "",
+    phone: phoneText(v.Phone),
+    email: plain(v.Email),
+    payment: plain(v["Payment method"]),
+    address: plain(v.Address),
+    accessArrange: /^Agent arranging/.test(plain(v.Access)),
+    siteContactName: plain(v["Site contact name"]),
+    siteContactPhone: phoneText(v["Site contact phone"]),
+    agencyId: plain(v["Agent/Agency ID"]),
+    referralCode: plain(v["Referral / offer code"]),
+    notes: plain(v.Notes),
+    bookedVia: plain(v["Booked via"]) || "Website"
+  };
+}
+
+// Makes a booking's calendar event again, from its row.
+function createEventForRow_(v, start, end) {
+  var d = bookingDataFromRow_(v);
+  return CalendarApp.getDefaultCalendar().createEvent(bookingEventTitle_(d), start, end, {
+    description: bookingEventDescription_(d, v.Reference, adminJobLink(v["Job token"], v.Reference)),
+    location: d.address
+  });
+}
+
+// Admin app: puts a booking back in the calendar after its event was
+// deleted by hand, at the time saved in the sheet. Its time is then blocked
+// on the website again and its reminders go out as normal.
+function adminRestoreEvent(token, force) {
+  requireOwner();
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { return { ok: false, error: "Busy, try again in a moment." }; }
+  try {
+    var row = findBookingByToken(token);
+    if (!row) return { ok: false, error: "not_found" };
+    var v = row.values;
+    if (v["Cancelled at"]) return { ok: false, error: "This booking is cancelled." };
+    if (v["Completed at"]) return { ok: false, error: "This job is already signed off." };
+    var start = sheetStart_(v);
+    if (findBookingEvent_(v.Reference, start)) return { ok: true, already: true };
+    if (!start) return { ok: false, error: "There's no saved time for this booking. Use Edit job to set the time: saving puts it back in the calendar." };
+    var end = sheetEnd_(v) || new Date(start.getTime() + SLOT_MINS * 60000);
+    var clashes = clashesFor_(start, end, null);
+    if (clashes.length && !force) return { ok: false, needsConfirm: true, clashes: clashes };
+    createEventForRow_(v, start, end);
+    try { refreshSlotsCache(); } catch (err) { console.error("Cache refresh after putting a booking back failed: " + err); }
+    return { ok: true, when: fmtWhen(start) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// For the morning check: open bookings with no calendar event, and jobs
+// done more than SIGNOFF_NUDGE_DAYS ago that still aren't signed off.
+function openBookingIssues_(now) {
+  var out = { missing: [], unsigned: [] };
+  var sheet = getCustomerSheet();
+  if (!sheet) return out;
+  var data = sheet.getDataRange().getValues();
+  var header = data[0];
+  var rows = [];
+  var earliest = now.getTime() - 60 * 86400000;
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (!v.Reference || v["Completed at"] || v["Cancelled at"]) continue;
+    rows.push(v);
+    var saved = sheetStart_(v);
+    if (saved && saved.getTime() - 86400000 < earliest) earliest = saved.getTime() - 86400000;
+  }
+  if (!rows.length) return out;
+  var events = bookingEventsByRef_(new Date(earliest), new Date(now.getTime() + 400 * 86400000));
+  rows.forEach(function (v) {
+    var ev = events[v.Reference];
+    var start = ev ? ev.getStartTime() : sheetStart_(v);
+    var label = v.Reference + " (" + (start ? fmtWhen(start) : bookingTimeText(v) || "no time saved") + ")";
+    if (!ev) out.missing.push(label);
+    if (start && now.getTime() - start.getTime() > SIGNOFF_NUDGE_DAYS * 86400000) out.unsigned.push(label);
+  });
+  return out;
+}
+
+// ---- One-time booking IDs (FRE-203, FRE-6) ----
+// The booking page sends a random requestId with each booking and reuses it
+// if it has to send the booking again (a dropped connection). A requestId
+// already booked gets the same answer back, never a second booking.
+var REQUEST_ID_COLUMN = "Request ID";
+var REQUEST_ID_CACHE_SECONDS = 21600; // 6 hours; the sheet column covers longer
+
+function cleanRequestId_(x) {
+  var id = typeof x === "string" ? x.trim() : "";
+  return /^[A-Za-z0-9_-]{16,64}$/.test(id) ? id : "";
+}
+
+function rememberRequestId_(id, reference) {
+  if (!id) return;
+  try {
+    CacheService.getScriptCache().put("bookingRequest_" + id, reference, REQUEST_ID_CACHE_SECONDS);
+  } catch (err) {
+    noteProblem_("Remembering a booking's request ID failed for " + reference, err);
+  }
+}
+
+// The reference already booked for this requestId, or null.
+function bookingForRequestId_(id) {
+  try {
+    var hit = CacheService.getScriptCache().get("bookingRequest_" + id);
+    if (hit) return hit;
+  } catch (err) {
+    console.error("Request ID cache read failed: " + err);
+  }
+  var sheet = getCustomerSheet();
+  if (!sheet) return null;
+  var data = sheet.getDataRange().getValues();
+  var col = data[0].indexOf(REQUEST_ID_COLUMN), refCol = data[0].indexOf("Reference");
+  if (col === -1 || refCol === -1) return null;
+  for (var i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][col]) === id) return data[i][refCol];
   }
   return null;
 }
@@ -3179,6 +3390,8 @@ function adminCreateBooking(form) {
     var reference = newBookingReference();
     var jobToken = newJobToken();
     d.manageToken = newJobToken(); // the customer's change-or-cancel link (FRE-213)
+    d.startsAt = built.start;
+    d.endsAt = built.end;
     var cal = CalendarApp.getDefaultCalendar();
     cal.createEvent(bookingEventTitle_(d), built.start, built.end, {
       description: bookingEventDescription_(d, reference, adminJobLink(jobToken, reference)),
@@ -3203,8 +3416,8 @@ function adminGetJobForEdit(token) {
   var row = findBookingByToken(token);
   if (!row) return { ok: false, error: "not_found" };
   var v = row.values;
-  var ev = findBookingEvent_(v.Reference);
-  var start = ev ? ev.getStartTime() : null, end = ev ? ev.getEndTime() : null;
+  var ev = findBookingEvent_(v.Reference, sheetStart_(v));
+  var start = ev ? ev.getStartTime() : sheetStart_(v), end = ev ? ev.getEndTime() : sheetEnd_(v);
   var list = {};
   try { list = getPriceList(v.Channel === "Agent/Landlord" ? "Agent/Landlord" : "Consumer"); } catch (err) { list = {}; }
   var lines = String(v.Items || "").split(", ").filter(function (x) { return x; }).map(function (part) {
@@ -3256,11 +3469,11 @@ function adminUpdateJob(token, form) {
     if (v["Completed at"]) return { ok: false, error: "This job is already signed off, so it can't be changed." };
     var d = built.data;
     var ref = v.Reference;
-    var ev = findBookingEvent_(ref);
+    var ev = findBookingEvent_(ref, sheetStart_(v));
     var clashes = clashesFor_(built.start, built.end, ev);
     if (clashes.length && !form.force) return { ok: false, needsConfirm: true, clashes: clashes };
 
-    var oldStart = ev ? ev.getStartTime() : null;
+    var oldStart = ev ? ev.getStartTime() : sheetStart_(v);
     var timeChanged = !oldStart || oldStart.getTime() !== built.start.getTime() || (ev && ev.getEndTime().getTime() !== built.end.getTime());
     var dayChanged = !oldStart || Utilities.formatDate(oldStart, TIMEZONE, "yyyy-MM-dd") !== Utilities.formatDate(built.start, TIMEZONE, "yyyy-MM-dd");
     var oldTotal = String(v.Total || ""), oldItems = String(v.Items || "");
@@ -3291,13 +3504,14 @@ function adminUpdateJob(token, form) {
     }
 
     var sheet = getCustomerSheet();
-    var header = ensureColumns(sheet, ["Notes", "Changes", "Booked via", "Access"]);
+    var header = ensureColumns(sheet, ["Notes", "Changes", "Booked via", "Access"].concat(START_COLUMNS));
     var log = String(v.Changes || "");
     var entry = Utilities.formatDate(new Date(), TIMEZONE, "d MMM") + ": " + (changes.length ? changes.join(", ") : "details") + (reason ? " (" + reason + ")" : "");
     var writes = {
       "Name": d.name, "Phone": d.phone, "Email": d.email, "Address": d.address,
       "Items": d.items, "Total": d.total, "Payment method": d.payment,
       "Booking time": fmtWhen(built.start),
+      "Starts at": built.start, "Ends at": built.end,
       "Business name": d.channel === "Agent/Landlord" ? d.businessName : "",
       "Site contact name": d.channel === "Agent/Landlord" && !d.accessArrange ? d.siteContactName : "",
       "Site contact phone": d.channel === "Agent/Landlord" && !d.accessArrange ? d.siteContactPhone : "",
@@ -3387,8 +3601,10 @@ function changeCtaHtml_(manageUrl, waLink) {
 function loadManagedBooking_(token) {
   var row = findBookingByTokenColumn_(MANAGE_TOKEN_COLUMN, token);
   if (!row) return null;
-  var ev = findBookingEvent_(row.values.Reference);
-  return { row: row, v: row.values, ev: ev, start: ev ? ev.getStartTime() : null, end: ev ? ev.getEndTime() : null };
+  var v = row.values;
+  var ev = findBookingEvent_(v.Reference, sheetStart_(v));
+  // If the event was deleted by hand, the time saved in the sheet stands in.
+  return { row: row, v: v, ev: ev, start: ev ? ev.getStartTime() : sheetStart_(v), end: ev ? ev.getEndTime() : sheetEnd_(v) };
 }
 
 // Why this booking can't be changed online, or null if it can.
@@ -3582,15 +3798,16 @@ function rescheduleBookingPublic(data) {
     }
 
     var oldStart = b.start;
-    b.ev.setTime(newStart, newEnd);
+    if (b.ev) b.ev.setTime(newStart, newEnd);
+    else createEventForRow_(v, newStart, newEnd); // its event had been deleted by hand
     var dayChanged = Utilities.formatDate(oldStart, TIMEZONE, "yyyy-MM-dd") !== newDay;
 
     var entry = Utilities.formatDate(now, TIMEZONE, "d MMM") + ": moved online by customer from " + fmtWhen(oldStart) + " to " + fmtWhen(newStart);
     try {
       var sheet = getCustomerSheet();
-      var header = ensureColumns(sheet, ["Changes", ONLINE_MOVES_COLUMN, "Early start request"]);
+      var header = ensureColumns(sheet, ["Changes", ONLINE_MOVES_COLUMN, "Early start request"].concat(START_COLUMNS));
       var log = String(v.Changes || "");
-      var writes = { "Booking time": fmtWhen(newStart), "Changes": (log ? log + "; " : "") + entry };
+      var writes = { "Booking time": fmtWhen(newStart), "Starts at": newStart, "Ends at": newEnd, "Changes": (log ? log + "; " : "") + entry };
       writes[ONLINE_MOVES_COLUMN] = moves + 1;
       if (newlyGiven) writes["Early start request"] = "Yes, ticked when moving online";
       // A job moved to another day gets its reminders again on the new dates.
@@ -4147,11 +4364,13 @@ function isLateCancellation(start, now) {
 
 // Deletes every calendar event carrying this booking reference. Returns
 // the start time of the (first) one found, or null.
-function deleteBookingEvents(reference) {
+function deleteBookingEvents(reference, hintStart) {
   var now = new Date();
   var found = null;
+  var from = now.getTime() - 60 * 86400000;
+  if (hintStart && hintStart.getTime() - 86400000 < from) from = hintStart.getTime() - 86400000;
   CalendarApp.getDefaultCalendar()
-    .getEvents(new Date(now.getTime() - 60 * 86400000), new Date(now.getTime() + 180 * 86400000))
+    .getEvents(new Date(from), new Date(now.getTime() + 400 * 86400000))
     .forEach(function (ev) {
       if (referenceFromEvent(ev) !== reference) return;
       if (!found) found = ev.getStartTime();
@@ -4188,7 +4407,7 @@ function cancelJobLocked_(token, opts) {
   if (v["Completed at"]) return { ok: false, error: "This job is already signed off, so it can't be cancelled." };
 
   var now = new Date();
-  var start = deleteBookingEvents(v.Reference);
+  var start = deleteBookingEvents(v.Reference, sheetStart_(v)) || sheetStart_(v);
   var late = !!start && isLateCancellation(start, now);
   // The fee is only ever for a late cancellation or no access, and never
   // when we're the ones cancelling (terms section 10).
@@ -4834,6 +5053,23 @@ function dailyHealthCheck_(opts) {
     if (!getBankDetails().complete) missing.push("the bank details");
     return missing.length ? "Missing from Script Properties: " + missing.join(" and ") + "." : "";
   });
+  // Bookings that have gone missing from the calendar, and jobs done but not
+  // signed off, so not invoiced (FRE-203).
+  var open = null;
+  var openNow = function () { if (!open) open = openBookingIssues_(now); return open; };
+  check("Couldn't check the bookings against the calendar", function () {
+    var list = openNow().missing;
+    if (!list.length) return "";
+    return (list.length === 1 ? "1 booking isn't" : list.length + " bookings aren't") + " in your calendar any more: " + list.join(", ") + ". " +
+      "Its time can be booked by someone else and no reminders go out. Open it in the admin app to put it back in the calendar, or cancel it so there's a record.";
+  });
+  check("Couldn't check the jobs waiting for sign-off", function () {
+    var list = openNow().unsigned;
+    if (!list.length) return "";
+    return (list.length === 1 ? "1 job" : list.length + " jobs") + " done more than " + SIGNOFF_NUDGE_DAYS + " days ago " +
+      (list.length === 1 ? "isn't" : "aren't") + " signed off yet, so " + (list.length === 1 ? "it hasn't" : "they haven't") + " been invoiced: " + list.join(", ") + ". " +
+      "They're under Waiting for sign-off in the admin app.";
+  });
   check("Couldn't check the bank holiday list", function () {
     var latest = getBankHolidays().slice().sort().pop();
     if (!latest) return "";
@@ -4871,7 +5107,7 @@ function dailyHealthCheck_(opts) {
       "More detail is in Apps Script under Executions.";
   } else if (isMonday || opts.force) {
     subject = "Booking system check: all fine";
-    body = "This morning's check found nothing wrong: booking times, prices, service area, email allowance, scheduled jobs, customer sheet and settings.\n\n" +
+    body = "This morning's check found nothing wrong: booking times, prices, service area, email allowance, scheduled jobs, customer sheet, settings, bookings against the calendar and jobs waiting for sign-off.\n\n" +
       "You get this note once a week. If it stops arriving, the morning job has stopped: run setUpDailyReminders once to restart it.";
   } else {
     return { sent: false, issues: issues, events: events };

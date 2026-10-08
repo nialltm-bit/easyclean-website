@@ -172,6 +172,7 @@
         (j.cancelled ? '<span class="pill cancelled">Cancelled</span>' :
          /^Agent arranging/.test(j.access || "") ? '<span class="pill due">Agent arranging access</span>'
           : '<span class="sub" style="margin:0;">' + esc(j.channel === "Agent/Landlord" ? "Agent" : "Homeowner") + '</span>') +
+        (j.calendarMissing ? '<span class="pill late">Not in calendar</span>' : '') +
       '</div>' +
     '</button>';
   }
@@ -664,7 +665,7 @@
     var waText = "Hi " + (j.contact || j.name) + ", could you confirm today's clean is done? Tap here to sign it off: " + j.signingLink;
     var flash = state.flash ? '<p class="note" style="margin:0 0 10px;">' + esc(state.flash) + '</p>' : '';
     state.flash = "";
-    app(head + flash +
+    app(head + flash + missingCalendarCard(j) +
       '<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="openEdit(\'' + esc(j.token) + '\')">Edit job (details, items, price, time)</button>' +
       '<div class="card" id="timer"><div class="pad-label">Time on job</div><div id="timer-body"></div></div>' +
       photosCard(j) +
@@ -693,6 +694,44 @@
     initCancel(j);
     renderTimer(j);
     initPhotos(j);
+  }
+
+  // ---------- Calendar event deleted by hand (FRE-203) ----------
+  // The booking is still in the sheet with its time, so it can go straight
+  // back in the calendar. Until then its time is free on the website and no
+  // reminders go out.
+  function missingCalendarCard(j) {
+    if (j.hasCalendarEvent) return "";
+    return '<div class="card">' +
+      '<p style="margin:0 0 8px;"><span class="pill late">Not in calendar</span></p>' +
+      '<p class="note" style="margin:0 0 10px;">This booking&#8217;s calendar event has been deleted, so its time can be booked by someone else and no reminders go out. Put it back, or cancel it below so there&#8217;s a record.</p>' +
+      (j.hasSavedTime
+        ? '<button class="btn btn-primary" id="btn-restore" onclick="restoreEvent(\'' + esc(j.token) + '\', false)">Put it back in the calendar</button>'
+        : '<p class="note" style="margin:0;">There&#8217;s no saved time for it. Use Edit job to set the time: saving puts it back in the calendar.</p>') +
+      '<div id="restore-confirm"></div>' +
+      '<p class="note" id="restore-msg"></p>' +
+    '</div>';
+  }
+
+  function restoreEvent(token, force) {
+    var b = $("btn-restore"), msg = $("restore-msg");
+    var reset = function () { if (b) { b.disabled = false; b.textContent = "Put it back in the calendar"; } };
+    if (b) { b.disabled = true; b.textContent = "Putting it back\u2026"; }
+    msg.className = "note"; msg.textContent = ""; $("restore-confirm").innerHTML = "";
+    call("adminRestoreEvent", token, !!force).then(function (r) {
+      reset();
+      if (r.needsConfirm) {
+        $("restore-confirm").innerHTML = '<div class="confirm-box">Already in your calendar at that time: <strong>' + esc(r.clashes.join(", ")) + '</strong>.' +
+          '<button class="btn btn-ghost" style="margin-top:8px;" onclick="restoreEvent(\'' + esc(token) + '\', true)">Put it back anyway</button></div>';
+        return;
+      }
+      if (!r.ok) { msg.className = "note bad"; msg.textContent = r.error; return; }
+      state.flash = "Back in your calendar" + (r.when ? " for " + r.when : "") + ".";
+      openJob(token);
+    }).catch(function (err) {
+      reset();
+      msg.className = "note bad"; msg.textContent = "Something went wrong: " + (err && err.message || err);
+    });
   }
 
   // ---------- Time on job ----------

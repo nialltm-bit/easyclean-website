@@ -33,6 +33,7 @@ Check these before changing either side.
   - **Optional fields:** `parking` (the radio button's value, up to 60 characters) and `notes` (up to 400). Code.gs joins them into the job's Notes as "Parking: ... ." followed by the notes.
   - **Emails ask for the extras (FRE-209):** the booking form keeps parking, notes and the code under a closed "Anything else?" link, so many customers leave them empty. When `notes` is empty (it already holds the parking answer), the confirmation and day-before emails add a line asking them to reply with parking, pets, gate codes or stains. The morning-of reminder doesn't.
   - **Agent page:** the business name is optional. If it's blank, Code.gs uses the person's name, the same as the admin app does for a private landlord.
+  - **One-time ID (`requestId`, FRE-203 and FRE-6):** the page can send a random `requestId` with each booking: 16 to 64 letters, numbers, `-` or `_`. It makes one per booking attempt and sends the same one again if it retries after a dropped connection. If Code.gs has already booked that `requestId`, it doesn't book again: it answers `{ ok: true, reference, repeat: true }` with the first booking's reference, even if that time now shows as taken. An ID of the wrong shape is ignored. Bookings without one still work. It's kept in the sheet's `Request ID` column (and cached for 6 hours).
   - **Early start (home page only):** `earlyStart` is `true` when the customer ticked the box asking us to clean within their 14-day cancellation period. The page shows the box when the chosen time is within 14 days of today, and Code.gs works that out again with `CANCEL_DAYS`. Both use UK dates. A booking without the tick is never refused: Code.gs records "Not given" and flags it in the new-booking email.
 - **Prices:**
   - **Where Code.gs reads them:** it doesn't trust the price the page sends. It reads the price rows on the built `index.html` and `agents.html` pages, in `parsePriceRows`.
@@ -49,7 +50,15 @@ Check these before changing either side.
 
 ## Morning check
 
-The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. It emails Niall if anything needs a look, including problems noted since the last check, and sends a short "all fine" note on Mondays. Turned-away website bookings also email him straight away (at most one an hour). To run the check by hand, pick `checkBookingSystem` in the function dropdown and press Run.
+The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. It emails Niall if anything needs a look, including problems noted since the last check, and sends a short "all fine" note on Mondays. It also lists any open booking that's missing from the calendar, and any job done more than 3 days ago (`SIGNOFF_NUDGE_DAYS`) that still isn't signed off, so isn't invoiced. Turned-away website bookings also email him straight away (at most one an hour). To run the check by hand, pick `checkBookingSystem` in the function dropdown and press Run.
+
+## Booking times in the sheet (FRE-203)
+
+- **Why:** the admin app used to get each job's time only from the calendar, looking 30 days either side of today. Jobs not signed off within 30 days dropped out of "Waiting for sign-off" and were never invoiced, and a booking whose event was deleted by hand vanished from every list.
+- **What's kept:** `Starts at` and `Ends at` columns, written when a booking is made (website or admin app) and whenever it's moved (admin app edit or the customer's change page). When the admin app opens, it also copies the calendar's time into the sheet for open bookings that don't have one yet, or that were dragged to a new time in Google Calendar. The calendar still wins when both are there.
+- **The lists:** "Waiting for sign-off" now has every past job that isn't signed off or cancelled, however old. "Coming up" is still the next 30 days.
+- **Event deleted by hand:** the booking stays in the lists with a "Not in calendar" label. Its job page has a "Put it back in the calendar" button that makes the event again at the saved time (it asks first if something else is now in that slot). Until then its time is free on the website and no reminders go out, which is why the morning check lists it. Cancelling it still works and uses the saved time for the late-cancellation rule. If the customer moves it on their change page, the event is made again at the new time.
+- **Older bookings with no saved time and no event:** these show under "Waiting for sign-off" with the label, with the `Booking time` text as their time. Cancel them so there's a record, or use Edit job to set a time.
 
 ## Time on job, photos and figures
 
@@ -67,10 +76,16 @@ All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any o
 - `node _tests/backend.test.js` runs `Code.gs` in Node with Google's services faked (`_tests/fake-google.js`). It needs no setup.
 - `node _tests/change-or-cancel.test.js` checks the change-or-cancel calls, emails and rules (FRE-213). It needs no setup.
 - `node _tests/cancellation-form.test.js` checks the homeowner confirmation email and its cancellation form PDF (FRE-212). It needs no setup.
+- `node _tests/booking-times.test.js` checks the saved booking times, the waiting list, putting a deleted event back, the morning check's new lines and one-time booking IDs (FRE-203, FRE-6). It needs no setup.
 - `node _tests/dashboard.test.js` drives `Dashboard.html` in a browser against the same fake, so the page and `Code.gs` are checked together. It needs the Playwright setup from `booking.test.js`.
 - These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
 
 ## Last updated
+
+8 October 2026 (night):
+
+- Booking times saved in the sheet (`Starts at`, `Ends at`), so unsigned jobs stay under "Waiting for sign-off" however old, and a booking whose calendar event was deleted by hand stays listed as "Not in calendar" with a button to put it back (FRE-203). The morning check lists both. Needs `Code.gs` and `Dashboard.html` pasted into Apps Script, and both deployments redeployed. Nothing to run: open the admin app once and it copies the times in for open bookings.
+- One-time booking IDs: Code.gs accepts `requestId` on `book` and never books the same one twice (FRE-203, FRE-6). The website side (booking.js sending it, and retrying) is separate.
 
 8 October 2026 (later):
 
