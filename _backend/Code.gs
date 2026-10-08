@@ -81,23 +81,16 @@
  *      are listed in service-area.js on the website, not in this file.
  *      Edit that file on GitHub to change the area; bookings pick it up
  *      within the hour. checkPriceList also logs the list it reads.
- *  15. Signature images are now private. Run makeSignaturesPrivate once
- *      to switch off link-sharing on the ones saved before this version.
- *  16. Day-before reminders and the Monday unpaid-invoice email run from
+ *  15. Day-before reminders and the Monday unpaid-invoice email run from
  *      the existing daily trigger (setUpDailyReminders); nothing to set up.
- *  17. Run repairSheetTextColumns once: it sets the Bookings sheet's text
- *      columns to plain text and puts back lost leading zeros on phone
- *      numbers. Bank holidays now close automatically (GOV.UK's list), and
- *      the admin app's "Time off" tab blocks other days or hours.
- *  18. Check Project Settings -> Time zone is Europe/London (slot times
+ *  16. Bank holidays close automatically (GOV.UK's list), and the admin
+ *      app's "Time off" tab blocks other days or hours.
+ *  17. Check Project Settings -> Time zone is Europe/London (slot times
  *      depend on it, especially when the clocks change).
- *  19. Run backfillIncomeColumn once: it fills the new "Income" column for
- *      jobs already signed off and bookings already cancelled, so the column
- *      adds up correctly (a cancelled booking counts its fee, not its total).
- *  20. The monthly figures email goes out from the daily trigger on the 1st
+ *  18. The monthly figures email goes out from the daily trigger on the 1st
  *      of each month. Run sendFiguresPreview any time to get last month's
  *      email now, and see the same numbers in the admin app's Figures tab.
- *  21. Run setUpManageTokens once (FRE-213): it gives every open booking a
+ *  19. Run setUpManageTokens once (FRE-213): it gives every open booking a
  *      "Manage token", so its reminder emails get the Change or cancel
  *      button that opens my-booking.html on the website.
  *
@@ -538,42 +531,6 @@ function phoneText(val) {
   return String(val);
 }
 
-/**
- * Run once after pasting this version (function dropdown -> Run). Sets the
- * text columns on the Bookings sheet to plain text so new values stay as
- * typed, and repairs older rows: phone numbers get their leading 0 (or +)
- * back, totals stored as numbers get their £ back, and booking times stored
- * as dates become readable text again. Safe to run again.
- */
-function repairSheetTextColumns() {
-  var sheet = getCustomerSheet();
-  if (!sheet) { Logger.log("Customer sheet not set up."); return; }
-  var header = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var lastRow = sheet.getLastRow();
-  var fixed = { phone: 0, total: 0, time: 0 };
-  header.forEach(function (h, i) {
-    if (TEXT_COLUMNS.indexOf(h) === -1) return;
-    var col = i + 1;
-    var whole = sheet.getRange(2, col, Math.max(sheet.getMaxRows() - 1, 1), 1);
-    if (lastRow < 2) { whole.setNumberFormat("@"); return; }
-    var range = sheet.getRange(2, col, lastRow - 1, 1);
-    var values = range.getValues();
-    var changed = false;
-    var out = values.map(function (r) {
-      var val = r[0];
-      if ((h === "Phone" || h === "Site contact phone") && typeof val === "number") { fixed.phone++; changed = true; return [phoneText(val)]; }
-      if (h === "Total" && typeof val === "number") { fixed.total++; changed = true; return ["£" + (val % 1 ? val.toFixed(2) : String(val))]; }
-      if (h === "Booking time" && val instanceof Date) { fixed.time++; changed = true; return [fmtWhen(val)]; }
-      if (val instanceof Date || typeof val === "number") { changed = true; return [String(val)]; }
-      return [val];
-    });
-    whole.setNumberFormat("@");
-    if (changed) range.setValues(out);
-  });
-  Logger.log("Text columns set to plain text. Repaired " + fixed.phone + " phone number(s), " + fixed.total +
-    " total(s) and " + fixed.time + " booking time(s).");
-}
-
 // Opens the customer sheet, keyed by header name rather than a hardcoded
 // column index — the sheet's columns have already grown twice (agent
 // fields, then completion fields) and will likely grow again, so reads
@@ -617,20 +574,6 @@ function referenceFromEvent(event) {
   var description = event.getDescription() || "";
   var match = description.match(/Reference:\s*(EC-\d+)/);
   return match ? match[1] : null;
-}
-
-// Which of today's calendar events are actually bookings (as opposed to,
-// say, an ad hoc school-pickup block Niall's added by hand) — anything with
-// no "Reference:" line is skipped rather than mistaken for a job.
-function getTodaysBookingReferences() {
-  var cal = CalendarApp.getDefaultCalendar();
-  var events = cal.getEventsForDay(new Date());
-  var refs = [];
-  events.forEach(function (ev) {
-    var ref = referenceFromEvent(ev);
-    if (ref) refs.push(ref);
-  });
-  return refs;
 }
 
 function getAvailableSlots() {
@@ -1693,11 +1636,11 @@ function buildSigningLinkEmailHtml(d) {
 // booking (double-tap, page reloaded after already submitting) — the
 // second call just reports back that it's already done rather than
 // sending a second thank-you email and burning another invoice number.
-// Internal/admin entry point: finds the booking by its job token (preferred,
-// always unique) or, for older callers, by reference. The public website can
-// only reach this through completeJobPublic() below.
+// Internal/admin entry point: finds the booking by its job token (always
+// unique, never the guessable EC- reference). The public website can only
+// reach this through completeJobPublic() below.
 function completeJob(data) {
-  if ((!data.token && !data.reference) || (!data.signature && !data.noSignature)) {
+  if (!data.token || (!data.signature && !data.noSignature)) {
     return { ok: false, error: "missing_fields" };
   }
   // One completion at a time, so a customer signing a remote link at the
@@ -1712,7 +1655,7 @@ function completeJob(data) {
 }
 
 function completeJobLocked_(data) {
-  var row = data.token ? findBookingByToken(data.token) : findBookingRow(data.reference);
+  var row = findBookingByToken(data.token);
   if (!row) return { ok: false, error: "not_found" };
   if (row.values["Completed at"]) {
     return { ok: true, alreadyCompleted: true };
@@ -2009,34 +1952,10 @@ function checkInvoiceSettings() {
 function saveSignature(reference, dataUrl) {
   var base64 = dataUrl.replace(/^data:image\/png;base64,/, "");
   var blob = Utilities.newBlob(Utilities.base64Decode(base64), "image/png", reference + "-signature.png");
-  var folder = getOrCreateSignatureFolder();
+  var folder = getOrCreateFolder("EasyClean Somerset — Signatures");
   // Private to the business Google account (the signed completion PDF is
   // what customers get). The sheet link opens for Niall when signed in.
   return folder.createFile(blob).getUrl();
-}
-
-/**
- * Run once (function dropdown -> Run) to make signature images saved before
- * this version private too. Safe to run again.
- */
-function makeSignaturesPrivate() {
-  var files = getOrCreateSignatureFolder().getFiles();
-  var changed = 0;
-  while (files.hasNext()) {
-    var f = files.next();
-    if (f.getSharingAccess() !== DriveApp.Access.PRIVATE) {
-      f.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE);
-      changed++;
-    }
-  }
-  Logger.log("Signature images made private: " + changed);
-}
-
-function getOrCreateSignatureFolder() {
-  var name = "EasyClean Somerset — Signatures";
-  var folders = DriveApp.getFoldersByName(name);
-  if (folders.hasNext()) return folders.next();
-  return DriveApp.createFolder(name);
 }
 
 // Invoice numbers count up from 1001 and never repeat or reuse a number,
@@ -2474,9 +2393,8 @@ function buildInvoicePdfBlob(v, inv) {
 //      Who has access: Only myself -> Deploy. Copy that /exec URL.
 //      (This is a SECOND deployment. Leave the existing public one alone.)
 //   3. Project Settings -> Script Properties -> add ADMIN_URL = that URL.
-//   4. Run setUpAdmin once (function dropdown -> Run). It gives every
-//      existing booking a job token and points upcoming calendar events'
-//      job links at the admin app.
+//   4. Nothing to run: the admin app gives any booking without a job
+//      token one the first time it loads.
 //   5. Open ADMIN_URL on your phone (in a browser where the business Google
 //      account is the default, i.e. signed into first) and "Add to Home
 //      Screen".
@@ -2615,36 +2533,6 @@ function ensureJobTokens(sheet) {
     }
   }
   return added;
-}
-
-/**
- * Run once after setting ADMIN_URL (see ADMIN APP SETUP above). Backfills
- * job tokens for existing bookings and rewrites the job link on calendar
- * events from 30 days ago to 60 days ahead so they open the admin app
- * instead of the old public page. Safe to run again.
- */
-function setUpAdmin() {
-  var url = getAdminUrl();
-  Logger.log(url ? "ADMIN_URL: " + url : "ADMIN_URL not set yet. Add it under Project Settings -> Script Properties, then run this again.");
-  var sheet = getCustomerSheet();
-  if (!sheet) { Logger.log("Customer sheet not set up."); return; }
-  Logger.log("Job tokens added to " + ensureJobTokens(sheet) + " existing booking(s).");
-  if (!url) return;
-  var now = new Date();
-  var from = new Date(now.getTime() - 30 * 86400000);
-  var to = new Date(now.getTime() + 60 * 86400000);
-  var updated = 0;
-  CalendarApp.getDefaultCalendar().getEvents(from, to).forEach(function (ev) {
-    var ref = referenceFromEvent(ev);
-    if (!ref) return;
-    var row = findBookingRow(ref);
-    if (!row || !row.values["Job token"]) return;
-    var desc = ev.getDescription() || "";
-    var line = JOB_LINK_LABEL + adminJobLink(row.values["Job token"], ref);
-    var next = /^Job link.*$/m.test(desc) ? desc.replace(/^Job link.*$/m, line) : desc + "\n" + line;
-    if (next !== desc) { ev.setDescription(next); updated++; }
-  });
-  Logger.log("Calendar job links updated on " + updated + " event(s).");
 }
 
 // ---- Admin app API (called from Dashboard.html via google.script.run) ----
@@ -3980,8 +3868,7 @@ function sendUnpaidDigest() {
 // A cancelled booking keeps its original Total in the sheet next to the £25
 // fee, so adding up the Total column overstates income. The "Income" column
 // holds what each signed-off job or cancellation really adds, so it adds up
-// correctly. It is filled in at sign-off and at cancellation, and
-// backfillIncomeColumn fills it in for older rows.
+// correctly. It is filled in at sign-off and at cancellation.
 //
 // The figures email (first of the month, from the daily trigger) and the
 // admin app's Figures tab work the same numbers out from the sheet. Income is
@@ -4024,30 +3911,6 @@ function writeIncome_(sheet, rowIndex, amount) {
   var cell = sheet.getRange(rowIndex, header.indexOf(INCOME_COLUMN) + 1);
   cell.setNumberFormat("£#,##0.00");
   cell.setValue(amount);
-}
-
-/**
- * Run once (function dropdown -> Run) after pasting this version. Fills the
- * Income column for jobs already signed off and bookings already cancelled.
- * Rows that already have an Income are left alone. Safe to run again.
- */
-function backfillIncomeColumn() {
-  var sheet = getCustomerSheet();
-  if (!sheet) { Logger.log("Customer sheet not set up."); return; }
-  ensureColumns(sheet, [INCOME_COLUMN]);
-  var data = sheet.getDataRange().getValues();
-  var header = data[0], filled = 0, kept = 0;
-  for (var i = 1; i < data.length; i++) {
-    var v = rowToObject(header, data[i]);
-    if (!v.Reference) continue;
-    var inc = incomeFor_(v);
-    if (!inc) continue;
-    var existing = v[INCOME_COLUMN];
-    if (existing !== "" && existing !== undefined && existing !== null) { kept++; continue; }
-    writeIncome_(sheet, i + 1, inc.amount);
-    filled++;
-  }
-  Logger.log("Income filled in for " + filled + " row(s). " + kept + " already had one.");
 }
 
 function readFigureRows_(sheet) {
@@ -4816,16 +4679,8 @@ function postcodeOutward(raw) {
   return m ? m[1] : null;
 }
 
-// Newer pages send the postcode on its own; older cached pages only send
-// it on the end of the address ("1 High St, BA3 2EE").
-function bookingPostcode(data) {
-  if (data.postcode) return data.postcode;
-  var parts = String(data.address || "").split(",");
-  return parts[parts.length - 1];
-}
-
 function checkServiceArea(data) {
-  var outward = postcodeOutward(bookingPostcode(data));
+  var outward = postcodeOutward(data.postcode);
   if (!outward) return { ok: false, error: "bad_postcode" };
   var list;
   try {

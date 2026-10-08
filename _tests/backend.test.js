@@ -285,20 +285,6 @@ function income() {
   const fixed = rows.reduce((s, x) => s + x.Income, 0);
   check("adding up Income gives the real income, adding up Total overstates it", fixed === 115 && naive === 710, [fixed, naive]);
 
-  // Backfill for rows made before this version.
-  const old1 = b.addBooking({ Reference: "EC-70001", "Completed at": b.date("2026-09-01T10:00:00Z"), Total: "£140" });
-  const old2 = b.addBooking({ Reference: "EC-70002", "Cancelled at": b.date("2026-09-02T10:00:00Z"), Total: "£200", "Cancellation fee": 25 });
-  const old3 = b.addBooking({ Reference: "EC-70003", "Cancelled at": b.date("2026-09-03T10:00:00Z"), Total: "£150" });
-  const open = b.addBooking({ Reference: "EC-70004", Total: "£150" });
-  const kept = b.addBooking({ Reference: "EC-70005", "Completed at": b.date("2026-09-04T10:00:00Z"), Total: "£100", Income: 80 });
-  c.backfillIncomeColumn();
-  check("backfill fills Income for done and cancelled rows", b.row("EC-70001").Income === 140 && b.row("EC-70002").Income === 25 && b.row("EC-70003").Income === 0, ["EC-70001", "EC-70002", "EC-70003"].map((x) => b.row(x).Income));
-  check("backfill leaves a job not done yet blank", b.row("EC-70004").Income === "");
-  check("backfill doesn't overwrite an Income already there", b.row("EC-70005").Income === 80);
-  const before = JSON.stringify(b.sheet().rows);
-  c.backfillIncomeColumn();
-  check("running the backfill again changes nothing", JSON.stringify(b.sheet().rows) === before);
-  check("the backfill says what it did", b.logs.some((l) => /Income filled in for 0 row/.test(l)));
 }
 
 // ================= Figures =================
