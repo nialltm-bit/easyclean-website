@@ -3,14 +3,11 @@
  *
  * This list is the ONE place to change the area. The booking pages
  * (index.html and agents.html) use it to check a postcode as it is typed,
- * and the booking system (Apps Script) reads this same file to double-check
- * every booking, so there is nothing to change anywhere else.
+ * and every booking is checked against it again.
  *
  * Each entry is a postcode district: the first half of a postcode
  * (BA1 1AA is in district BA1). To add an area, add its district in quotes
  * with a comma after it. To remove one, delete its line.
- * The website picks up a change within about 10 minutes, the booking
- * system within about an hour.
  *
  * Anyone outside these districts is offered WhatsApp instead of booking online.
  */

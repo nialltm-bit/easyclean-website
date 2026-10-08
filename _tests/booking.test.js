@@ -62,7 +62,7 @@ async function openPage(browser, url, contextOptions, now) {
     try { localStorage.setItem("ecCookieConsent", JSON.stringify({ v: "denied", t: Date.now() })); } catch (e) {}
   });
   const page = await context.newPage();
-  const fake = { bookings: [], replies: [], errors: [], timeRequests: 0 };
+  const fake = { bookings: [], replies: [], errors: [], timeRequests: 0, drop: 0, notJson: 0 };
   page.on("pageerror", (e) => fake.errors.push(e.message));
   await page.route(/script\.google\.com/, (route) => {
     const req = route.request();
@@ -72,6 +72,8 @@ async function openPage(browser, url, contextOptions, now) {
       return route.fulfill({ contentType: "application/json", body: JSON.stringify({ ok: true, slots: SLOTS }) });
     }
     fake.bookings.push(JSON.parse(req.postData()));
+    if (fake.drop > 0) { fake.drop--; return route.abort(); } // the request never gets a reply
+    if (fake.notJson > 0) { fake.notJson--; return route.fulfill({ status: 502, body: "<html>bad gateway</html>" }); }
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(fake.replies.shift()) });
   });
   await page.route(/googletagmanager|fonts\.g|trustpilot/, (route) => route.abort());
@@ -191,12 +193,36 @@ async function bookingPage(browser, base, file) {
   await page.click(".bf-slot-btn >> text=2:00pm");
 
   // "That time was just taken"
+  const ID_SHAPE = /^[0-9a-f]{32}$/;
   fake.replies.push({ ok: false, error: "slot_taken" });
   await page.click("#bf-submit");
   await page.waitForFunction(() => document.getElementById("bf-status").textContent.includes("just taken"));
+  const takenTry = fake.bookings.slice();
+  check("the booking payload has a 32-character hex requestId", takenTry.length === 1 && ID_SHAPE.test(takenTry[0].requestId), takenTry.map((b) => b.requestId));
+  check("slot_taken is not retried", takenTry.length === 1, takenTry.length);
   await page.waitForSelector(".bf-slot-btn");
   check("after a slot is taken, Confirm stays off until a new time", await confirmOff());
   await page.click(".bf-slot-btn >> text=9:00am");
+
+  // Every try fails (dropped, not JSON, busy): the WhatsApp fallback shows, and the ID never changes.
+  fake.bookings.length = 0;
+  fake.drop = 1;
+  fake.notJson = 1;
+  fake.replies.push({ ok: false, error: "busy" });
+  await page.click("#bf-submit");
+  await page.waitForFunction(() => document.getElementById("bf-status").textContent.includes("went wrong"), null, { timeout: 15000 });
+  check("a dropped request, a non-JSON reply and busy are all retried (3 tries)", fake.bookings.length === 3, fake.bookings.length);
+  check("every try uses the same requestId", new Set(fake.bookings.map((b) => b.requestId)).size === 1);
+  check("after all the tries fail, the WhatsApp fallback shows", (await page.$$("#bf-status a")).length === 1 && (await href("#bf-status a")).includes("Test Person"));
+  check("and Confirm comes back on", !(await confirmOff()));
+
+  // A new press makes a new requestId.
+  fake.bookings.length = 0;
+  fake.replies.push({ ok: false, error: "something_else" });
+  await page.click("#bf-submit");
+  await page.waitForFunction(() => document.getElementById("bf-status").textContent.includes("went wrong"));
+  check("a press after a failure makes a new requestId", fake.bookings.length === 1 && ID_SHAPE.test(fake.bookings[0].requestId), fake.bookings.map((b) => b.requestId));
+  check("other error codes are not retried", fake.bookings.length === 1, fake.bookings.length);
 
   // A booking that fails offers WhatsApp with the details filled in.
   fake.replies.push({ ok: false, error: "something_else" });
@@ -205,7 +231,10 @@ async function bookingPage(browser, base, file) {
   check("a failed booking offers WhatsApp with the details", (await href("#bf-status a")).includes("Test Person") && !(await confirmOff()));
 
   // A booking that goes through.
-  fake.replies.push({ ok: true, reference: "EC-TEST1" });
+  // The first try is dropped; the retry gets the repeat reply, as if the first got through.
+  fake.bookings.length = 0;
+  fake.drop = 1;
+  fake.replies.push({ ok: true, reference: "EC-TEST1", repeat: true });
   await page.click("#bf-extras summary");
   if (!agents) {
     await page.check('input[name="bf-payment"][value="Bank transfer"]');
@@ -216,8 +245,12 @@ async function bookingPage(browser, base, file) {
     await page.fill("#bf-agency-id", "REF-9");
   }
   await page.click("#bf-submit");
+  await page.waitForFunction(() => document.getElementById("bf-status").textContent.includes("Still sending your booking"));
+  check("while retrying, the button stays off and a status line shows", await confirmOff());
   await page.waitForSelector("#booking-confirmed .ref");
-  check("confirmation shows the reference", (await page.textContent("#booking-confirmed .ref")) === "EC-TEST1");
+  check("a dropped request is retried once with the same requestId", fake.bookings.length === 2 && fake.bookings[0].requestId === fake.bookings[1].requestId && ID_SHAPE.test(fake.bookings[0].requestId), fake.bookings.map((b) => b.requestId));
+  check("the retry sends the same booking", JSON.stringify(Object.assign({}, fake.bookings[0], { requestId: 0 })) === JSON.stringify(Object.assign({}, fake.bookings[1], { requestId: 0 })));
+  check("the confirmation shows once, with the reference", (await page.$$("#booking-confirmed .ref")).length === 1 && (await page.textContent("#booking-confirmed .ref")) === "EC-TEST1");
   check("URL changes to #booked for Analytics", (await page.evaluate(() => location.hash)) === "#booked");
 
   const sent = fake.bookings[fake.bookings.length - 1];

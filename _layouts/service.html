@@ -30,9 +30,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% include fonts.html %}
 
 {% include business-schema.html %}
 <script type="application/ld+json">
@@ -264,9 +262,6 @@
 </style>
 </head>
 <body>
-<!-- Layout for the service pages (end-of-tenancy, sofa, mattress). Each
-     page sets its title, intro and price groups in its front matter; the
-     prices come from _data/prices.yml and the towns from _data/business.yml. -->
 <a class="skip-link" href="#main">Skip to main content</a>
 
 <header class="site">

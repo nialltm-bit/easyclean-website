@@ -10,15 +10,12 @@
 <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% include fonts.html %}
 
 <style>
   /* The page a customer opens from an emailed/WhatsApped link to sign off
      their own job. The link carries the booking's secret job token (t=),
-     never the short EC- reference. Niall's own on-site sign-off now lives in
-     the private admin app, not here. No GA4/OG/SEO: not a public page. */
+     never the short EC- reference. No GA4/OG/SEO: not a public page. */
   :root {
     --ink: #12232B;
     --ink-soft: #2A3D46;
@@ -286,7 +283,7 @@
       submitBtn.textContent = "Sending…";
       fetch(APPS_SCRIPT_URL, {
         method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight Apps Script can't answer
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
         body: JSON.stringify({ action: "complete", token: token, signature: canvas.toDataURL("image/png") })
       })
         .then(function (r) { return r.json(); })

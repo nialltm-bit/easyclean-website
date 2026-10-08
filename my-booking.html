@@ -10,9 +10,7 @@
 <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+{% include fonts.html %}
 
 <style>
   /* The page a customer opens from the Change or cancel button in their
@@ -330,7 +328,7 @@
   function post(body) {
     return fetch(APPS_SCRIPT_URL, {
       method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight Apps Script can't answer
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
       body: JSON.stringify(body)
     }).then(function (r) { return r.json(); });
   }

@@ -251,12 +251,10 @@ window.ecBooking = function (config) {
     });
   });
 
-  // ---- Booking flow (Google Apps Script backend) ----
-  // APPS_SCRIPT_URL is the booking system's web app (ends in /exec). It
-  // lists the free times and creates the booking in the calendar. If it's
-  // ever blank, this section shows a WhatsApp fallback instead.
+  // ---- Booking flow ----
+  // The booking system's web address. It lists the free times and creates
+  // the booking in the calendar.
   var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzib7aiWlTG1JN1vawUToNL2r9OYoFp-fJYNsbvJdhHAHtLaddPr0wMKYnxYLwoQxt_GA/exec";
-  var APPS_SCRIPT_CONFIGURED = !!APPS_SCRIPT_URL && APPS_SCRIPT_URL.indexOf("http") === 0;
 
   var slotsLoaded = false;
   var slotsCache = [];
@@ -266,31 +264,25 @@ window.ecBooking = function (config) {
   var DAY_PAGE_SIZE = 7;
   var confirmedBookingRef = null;
 
-  document.getElementById("booking-fallback-wa").href = waLink(defaultMsg);
-
   // Start checking the calendar for available times as soon as the page
   // loads, quietly in the background — not when someone first reaches the
   // booking section. Most visitors spend a few seconds on the price list
   // first, so by the time they reach "Choose a time" the result is
   // usually already sitting there waiting instead of making them watch a
   // loading message.
-  if (APPS_SCRIPT_CONFIGURED) {
-    slotsLoaded = true;
-    fetchSlots();
-  }
+  slotsLoaded = true;
+  fetchSlots();
 
   function updateBookingSection() {
     if (confirmedBookingRef) return; // a booking already went through — leave the confirmation showing
 
     var needItems = document.getElementById("booking-need-items");
     var summary = document.getElementById("booking-summary");
-    var fallback = document.getElementById("booking-fallback");
     var form = document.getElementById("booking-form");
 
     if (currentSelection.total === 0) {
       needItems.style.display = "block";
       summary.style.display = "none";
-      fallback.style.display = "none";
       form.style.display = "none";
       return;
     }
@@ -304,12 +296,6 @@ window.ecBooking = function (config) {
     document.getElementById("booking-summary-total").textContent = formatGBP(currentSelection.total);
     document.getElementById("booking-summary-time").textContent = "~" + formatMins(currentSelection.totalMins);
 
-    if (!APPS_SCRIPT_CONFIGURED) {
-      fallback.style.display = "block";
-      form.style.display = "none";
-      return;
-    }
-    fallback.style.display = "none";
     form.style.display = "block";
 
     var altDayMsg = currentSelection.lines.length
@@ -367,9 +353,9 @@ window.ecBooking = function (config) {
   }
 
   // The day picker also shows days with no times. It works out the window the
-  // same way the booking system does, so these two must match Code.gs: the
+  // same way the booking system does, so these two must match it: the
   // first day is the one 24 hours from now (LEAD_TIME_HOURS) and the window
-  // is 21 days from today (DAYS_AHEAD). If Code.gs ever offers a time outside
+  // is 21 days from today (DAYS_AHEAD). If the booking system ever offers a time outside
   // that, the list stretches to include it, so a free time is never hidden.
   var LEAD_TIME_HOURS = 24;
   var DAYS_AHEAD = 21;
@@ -695,7 +681,6 @@ window.ecBooking = function (config) {
     document.getElementById("booking-summary").style.display = "none";
     document.getElementById("booking-form").style.display = "none";
     document.getElementById("booking-need-items").style.display = "none";
-    document.getElementById("booking-fallback").style.display = "none";
     var confirmedEl = document.getElementById("booking-confirmed");
     confirmedEl.style.display = "block";
     confirmedEl.innerHTML =
@@ -723,6 +708,24 @@ window.ecBooking = function (config) {
   function value(id) {
     return document.getElementById(id).value.trim();
   }
+
+  // A random 32-character ID for one press of the book button.
+  function newRequestId() {
+    var out = "";
+    try {
+      var bytes = new Uint8Array(16);
+      window.crypto.getRandomValues(bytes);
+      for (var i = 0; i < bytes.length; i++) out += ("0" + bytes[i].toString(16)).slice(-2);
+      return out;
+    } catch (err) {
+      out = "";
+      for (var j = 0; j < 32; j++) out += Math.floor(Math.random() * 16).toString(16);
+      return out;
+    }
+  }
+
+  // Waits before the 2 extra tries, in milliseconds.
+  var RETRY_WAITS = [2000, 5000];
 
   document.getElementById("booking-form").addEventListener("submit", function (e) {
     e.preventDefault();
@@ -767,12 +770,40 @@ window.ecBooking = function (config) {
       payload.siteContactPhone = accessArrange() ? "" : value("bf-site-contact-phone");
     }
 
-    fetch(APPS_SCRIPT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight Apps Script can't answer
-      body: JSON.stringify(payload)
-    })
-      .then(function (r) { return r.json(); })
+    // One ID per press of the button. A retry of this same booking sends the
+    // same ID, so the booking system never books it twice.
+    payload.requestId = newRequestId();
+    var body = JSON.stringify(payload);
+
+    function sendBooking() {
+      return fetch(APPS_SCRIPT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
+        body: body
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (data && data.ok === false && data.error === "busy") throw new Error("busy");
+          return data;
+        });
+    }
+
+    // Retry only when the request itself failed (no reply, a reply that isn't
+    // JSON, or "busy"). Any other answer is final.
+    function sendWithRetries(triesLeft) {
+      return sendBooking().catch(function (err) {
+        var wait = RETRY_WAITS[RETRY_WAITS.length - triesLeft];
+        if (wait === undefined) throw err;
+        statusEl.textContent = "Still sending your booking...";
+        statusEl.className = "bf-status";
+        statusEl.style.display = "block";
+        announce(statusEl.textContent);
+        return new Promise(function (resolve) { setTimeout(resolve, wait); })
+          .then(function () { return sendWithRetries(triesLeft - 1); });
+      });
+    }
+
+    sendWithRetries(RETRY_WAITS.length)
       .then(function (data) {
         if (!data.ok) {
           if (data.error === "out_of_area" || data.error === "bad_postcode") {
