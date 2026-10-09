@@ -1162,6 +1162,7 @@ layout: null
 {%- endfor %}
       </div>
       <p class="area-note">In Bristol we cover the centre, south and east. Not sure? Type your postcode when you book, or WhatsApp us.</p>
+      <p class="area-note">Local pages: {% include town-links.html %}.</p>
       <div class="hours-grid">
 {%- for h in site.data.business.hours %}
         <div class="hours-cell"><div class="d">{{ h.days }}</div><div class="t">{{ h.time }}</div></div>

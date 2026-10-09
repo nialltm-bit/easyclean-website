@@ -1,0 +1,15 @@
+{%- comment -%}
+  Links to the six town pages. Leave out the page you are on.
+  Use: {% include town-links.html %}
+{%- endcomment -%}
+{%- assign town_pages = "carpet-cleaning-bath.html|Bath,carpet-cleaning-midsomer-norton-radstock.html|Midsomer Norton and Radstock,carpet-cleaning-keynsham.html|Keynsham,carpet-cleaning-frome.html|Frome,carpet-cleaning-wells.html|Wells,carpet-cleaning-south-bristol.html|South Bristol" | split: "," -%}
+{%- assign shown = 0 -%}
+{%- for tp in town_pages -%}
+  {%- assign bits = tp | split: "|" -%}
+  {%- assign tp_url = "/" | append: bits[0] -%}
+  {%- if tp_url != page.url -%}
+    {%- if shown > 0 -%}, {% endif -%}
+    <a href="{{ bits[0] }}">{{ bits[1] }}</a>
+    {%- assign shown = shown | plus: 1 -%}
+  {%- endif -%}
+{%- endfor -%}
