@@ -28,6 +28,22 @@ window.ecBooking = function (config) {
 
   var messages = config.messages;
 
+  // ---- Google Analytics: one event per step of the form ----
+  // Lets us see where people give up. Only sent once the visitor has
+  // accepted analytics cookies (the choice consent.js saves), so nothing
+  // extra goes out before consent and nothing queued is sent later. No
+  // personal data: just the step, the channel, item names and the postcode
+  // area (like "BA3"), never a full postcode, name, email or phone number.
+  function track(name, params) {
+    try {
+      var c = JSON.parse(localStorage.getItem("ecCookieConsent"));
+      if (!c || c.v !== "granted" || typeof gtag !== "function") return;
+      params = params || {};
+      params.channel = config.channel;
+      gtag("event", name, params);
+    } catch (err) {}
+  }
+
   // Business WhatsApp number.
   var WHATSAPP_NUMBER = "447873212249";
 
@@ -223,7 +239,10 @@ window.ecBooking = function (config) {
     row.querySelectorAll("button").forEach(function (btn) {
       btn.addEventListener("click", function () {
         var action = btn.getAttribute("data-action");
-        if (action === "inc") state[name] = Math.min(state[name] + 1, 9);
+        if (action === "inc") {
+          if (state[name] < 9) track("booking_item_added", { item_name: name });
+          state[name] = Math.min(state[name] + 1, 9);
+        }
         if (action === "dec") state[name] = Math.max(state[name] - 1, 0);
         qtyEl.textContent = state[name];
         render();
@@ -449,6 +468,7 @@ window.ecBooking = function (config) {
       btn.addEventListener("click", function () {
         var day = btn.getAttribute("data-day");
         if (day !== selectedDay) {
+          track("booking_day_picked");
           // A time picked on the previous day would stay selected but out of
           // sight, and Confirm would still book it. Start the new day fresh.
           selectedSlot = null;
@@ -500,6 +520,7 @@ window.ecBooking = function (config) {
     slotsEl.querySelectorAll(".bf-slot-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
         selectedSlot = btn.getAttribute("data-start");
+        track("booking_time_picked");
         renderSlots();
         refocus(slotsEl, ".bf-slot-btn", "data-start", selectedSlot);
         updateSubmitEnabled();
@@ -514,6 +535,7 @@ window.ecBooking = function (config) {
   // If that file ever fails to load, the page lets the booking through and
   // the booking system still checks it.
   var areaTouched = false;
+  var areaTracked = ""; // last postcode area sent to analytics, so each is sent once
   var areaNote = ""; // last postcode note read out, so it isn't repeated on every keystroke
   function postcodeArea() {
     if (typeof window.ecPostcodeCheck !== "function") return { status: "ok" };
@@ -523,6 +545,13 @@ window.ecBooking = function (config) {
     var el = document.getElementById("bf-area-msg");
     var r = postcodeArea();
     var note = "";
+    if ((r.status === "ok" || r.status === "out") && r.outward && r.outward !== areaTracked) {
+      areaTracked = r.outward;
+      track("booking_postcode_checked", {
+        result: r.status === "ok" ? "in_area" : "out_of_area",
+        postcode_area: r.outward
+      });
+    }
     if (r.status === "out") {
       note = messages.outOfAreaNote(r.outward);
       el.innerHTML = '<p>' + escapeHtml(note) + '</p>' +
@@ -727,8 +756,17 @@ window.ecBooking = function (config) {
   // Waits before the 2 extra tries, in milliseconds.
   var RETRY_WAITS = [2000, 5000];
 
+  // The first time anything other than the postcode is typed in.
+  var detailsStarted = false;
+  document.getElementById("booking-form").addEventListener("input", function (e) {
+    if (detailsStarted || !e.target || e.target.id === "bf-postcode") return;
+    detailsStarted = true;
+    track("booking_details_started");
+  });
+
   document.getElementById("booking-form").addEventListener("submit", function (e) {
     e.preventDefault();
+    track("booking_confirm_pressed", { value: currentSelection.total, currency: "GBP" });
     var statusEl = document.getElementById("bf-status");
     var submitBtn = document.getElementById("bf-submit");
     submitBtn.setAttribute("disabled", "disabled");
@@ -808,6 +846,7 @@ window.ecBooking = function (config) {
         if (!data.ok) {
           if (data.error === "out_of_area" || data.error === "bad_postcode") {
             areaTouched = true;
+            track("booking_failed", { reason: data.error });
             renderAreaMsg();
             if (data.error === "out_of_area") {
               statusEl.innerHTML = 'We don’t take online bookings in that area yet. <a href="' + waLink(messages.outOfAreaRefused(payload)) + '" target="_blank" rel="noopener">Message us on WhatsApp</a> and we’ll see what we can do.';
@@ -821,6 +860,7 @@ window.ecBooking = function (config) {
             return;
           }
           if (data.error === "slot_taken") {
+            track("booking_failed", { reason: "slot_taken" });
             statusEl.textContent = "That time was just taken. Pick another below.";
             statusEl.className = "bf-status err";
             statusEl.style.display = "block";
@@ -836,6 +876,7 @@ window.ecBooking = function (config) {
         showConfirmed(data.reference, payload);
       })
       .catch(function () {
+        track("booking_failed", { reason: "error" });
         statusEl.innerHTML = 'Something went wrong on our end. <a href="' + waLink(messages.bookingFailed(payload)) + '" target="_blank" rel="noopener">Send us your details on WhatsApp</a> and we’ll confirm manually.';
         statusEl.className = "bf-status err";
         statusEl.style.display = "block";
