@@ -56,9 +56,20 @@ The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. I
 
 - **Why:** the admin app used to get each job's time only from the calendar, looking 30 days either side of today. Jobs not signed off within 30 days dropped out of "Waiting for sign-off" and were never invoiced, and a booking whose event was deleted by hand vanished from every list.
 - **What's kept:** `Starts at` and `Ends at` columns, written when a booking is made (website or admin app) and whenever it's moved (admin app edit or the customer's change page). When the admin app opens, it also copies the calendar's time into the sheet for open bookings that don't have one yet, or that were dragged to a new time in Google Calendar. The calendar still wins when both are there.
+- **Dragged in Google Calendar:** the daily trigger (before the reminders) and the admin app both copy the calendar's time into the sheet. A move also rewrites the `Booking time` text, adds "moved in the calendar from ... to ..." to `Changes`, and, if it's a different day, clears the two "reminder sent" columns so the reminders go again for the new day (`syncOpenBookingTimes_`).
 - **The lists:** "Waiting for sign-off" now has every past job that isn't signed off or cancelled, however old. "Coming up" is still the next 30 days.
 - **Event deleted by hand:** the booking stays in the lists with a "Not in calendar" label. Its job page has a "Put it back in the calendar" button that makes the event again at the saved time (it asks first if something else is now in that slot). Until then its time is free on the website and no reminders go out, which is why the morning check lists it. Cancelling it still works and uses the saved time for the late-cancellation rule. If the customer moves it on their change page, the event is made again at the new time.
 - **Older bookings with no saved time and no event:** these show under "Waiting for sign-off" with the label, with the `Booking time` text as their time. Cancel them so there's a record, or use Edit job to set a time.
+
+## Customers (FRE-203, FRE-195)
+
+- **Repeat customers:** a booking is matched to others with the same email (any case) or phone (any format: `07700...`, `+44 7700...`, `447700...`). Your new-booking email says "Booked before: N other bookings (done, still booked, cancelled). Latest: ...". In the admin app, job cards say "Booked before", and the job page lists up to 10 of their other bookings, newest first, each one tappable.
+- **Site contact reminder:** the day before an agent job with a named site contact (not the booker's own number, not "agent arranging access"), the daily trigger emails you a list of tomorrow's agent jobs with a WhatsApp link for each one. The link opens a ready-written message to the tenant or site contact; you check it and press send. It's sent once per day (`SITE_CONTACT_DIGEST_DAY` in Script Properties). The open job's page in the admin app has the same "WhatsApp the site contact" button. No paid messaging service is involved.
+- **Marketing opt-ins:**
+  - Each opt-in saves the exact words of the tick box and the date, in `Marketing consent`. The words come from `MARKETING_CONSENT_TEXT` (one per page), or from `marketingConsentText` if the page ever sends it (up to 300 characters). Opt-ins from before 9 October 2026 have no words saved, and the list says so.
+  - **If you change a tick box's wording on the website, change `MARKETING_CONSENT_TEXT` too.** The morning check reads both pages and tells you if they differ.
+  - Unsubscribes: when someone replies STOP, open any of their jobs in the admin app and tap "They asked to stop: unsubscribe them". That sets `Unsubscribed on` for every booking with their email. Ticking the box on a later booking counts as fresh consent.
+  - Before sending any marketing, run `refreshMarketingList` from the function dropdown. It rebuilds the "Marketing list" tab: one row per email that opted in and hasn't unsubscribed since, with the words they agreed to and when. Send only to that list, and every marketing email must say how to unsubscribe (for now, "reply STOP"). A one-click unsubscribe link would need a small page on the website; it isn't built yet.
 
 ## Invoices and the Agencies tab
 
@@ -87,10 +98,15 @@ All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any o
 - `node _tests/cancellation-form.test.js` checks the homeowner confirmation email and its cancellation form PDF (FRE-212). It needs no setup.
 - `node _tests/booking-times.test.js` checks the saved booking times, the waiting list, putting a deleted event back, the morning check's new lines and one-time booking IDs (FRE-203, FRE-6). It needs no setup.
 - `node _tests/invoices-agencies.test.js` checks the late-payment line, agency name matching and `Same as`, and the job date on jobs signed off later (FRE-195, FRE-203). It needs no setup.
+- `node _tests/customers-and-contacts.test.js` checks jobs dragged in the calendar, repeat customers, the site contact email and link, and marketing consent, unsubscribes and the marketing list (FRE-203, FRE-195). It needs no setup.
 - `node _tests/dashboard.test.js` drives `Dashboard.html` in a browser against the same fake, so the page and `Code.gs` are checked together. It needs the Playwright setup from `booking.test.js`.
 - These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
 
 ## Last updated
+
+9 October 2026 (later still):
+
+- Jobs dragged in Google Calendar update the `Booking time` text and their reminders; repeat customers shown in the new-booking email and the admin app; a daily email with WhatsApp links for tomorrow's agent site contacts, plus a button on the job page; marketing consent wording saved with each opt-in, unsubscribes in the admin app, and `refreshMarketingList` (FRE-203, FRE-195). Needs `Code.gs` and `Dashboard.html` pasted into Apps Script, and both deployments redeployed. Nothing to run now: run `refreshMarketingList` only when you're about to send marketing.
 
 9 October 2026 (afternoon):
 
