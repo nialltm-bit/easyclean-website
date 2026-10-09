@@ -263,12 +263,48 @@ async function customerCards(browser) {
   await context.close();
 }
 
+async function dayOff(browser) {
+  console.log("\n== Admin app: I can't work today (FRE-223)");
+  const b = loadBackend({ live: true });
+  b.setUpSheet();
+  const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(10, 0, 0, 0);
+  const v = b.addBooking({ Reference: "EC-40001", Name: "Sam Tomorrow", Email: "sam@example.com", "Manage token": "e".repeat(32) }, t.toISOString());
+  b.addBooking({ Reference: "EC-40002", Name: "Pat NoEmail", Email: "" }, new Date(t.getTime() + 3 * 3600000).toISOString());
+
+  let { page, context, errors } = await openAdmin(browser, b, "home");
+  await page.waitForSelector("text=I can’t work today");
+  await page.click("text=I can’t work today");
+  await page.waitForSelector("#off-date");
+  await page.selectOption("#off-date", { index: 1 });
+  await page.waitForSelector("text=EC-40001");
+  let text = (await page.innerText("#app")).replace(/\s+/g, " ");
+  check("tomorrow's jobs are listed before anything happens", /EC-40001/.test(text) && /EC-40002/.test(text) && b.state.emails.length === 0, text.slice(0, 500));
+  check("the one with no email is pointed out", /no email, you’ll need to call them/i.test(text));
+  check("the button says what it will do", /Cancel these 2 jobs and email them/i.test(text));
+  await page.selectOption("#off-reason", "vehicle");
+  await page.click("#off-go");
+  await page.waitForSelector("text=Back to jobs");
+  text = (await page.innerText("#app")).replace(/\s+/g, " ");
+  check("done: says who was emailed and who to contact", /1 of 2 customers emailed\. Contact these yourself: EC-40002/i.test(text), text.slice(0, 400));
+  check("the customer got the email with the reason picked", /because of a problem with our vehicle/.test((b.sentTo("sam@example.com")[0] || {}).body || ""));
+  await page.click("text=Back to jobs");
+  await page.waitForSelector("text=Waiting for a new time");
+  text = (await page.innerText("#app")).replace(/\s+/g, " ");
+  check("the jobs show under Waiting for a new time", /Waiting for a new time[^]*EC-40001[^]*Needs a new time/i.test(text), text.slice(0, 600));
+  await page.evaluate((tok) => window.openJob(tok), v["Job token"]);
+  await page.waitForSelector("text=You cancelled this day");
+  check("the job page explains it", /Needs a new time[^]*You cancelled this day and asked them to pick a new time/i.test((await page.innerText("#app")).replace(/\s+/g, " ")));
+  check("no page errors", errors.length === 0, errors);
+  await context.close();
+}
+
 (async () => {
   const browser = await chromium.launch();
   try {
     await jobPage(browser);
     await tabs(browser);
     await customerCards(browser);
+    await dayOff(browser);
   } finally {
     await browser.close();
   }

@@ -174,6 +174,7 @@
           : '<span class="sub" style="margin:0;">' + esc(j.channel === "Agent/Landlord" ? "Agent" : "Homeowner") + '</span>') +
         (j.calendarMissing ? '<span class="pill late">Not in calendar</span>' : '') +
         (j.repeat ? '<span class="pill done">Booked before</span>' : '') +
+        (j.needsNewTime ? '<span class="pill late">Needs a new time</span>' : '') +
       '</div>' +
     '</button>';
   }
@@ -222,10 +223,13 @@
     if (state.tab === "figures") { app(tabs + '<div id="fig"><p class="loading">Loading&hellip;</p></div>'); loadFigures(); return; }
     var body;
     if (state.tab === "jobs") {
+      var newTime = o.newTime || [];
       body = '<button class="btn btn-primary" style="margin-bottom:12px;" onclick="newBooking()">+ New booking</button>' +
         '<div class="search"><input type="search" id="q" placeholder="EC- reference, name or address" onkeydown="if(event.key===\'Enter\')runSearch()"><button class="btn btn-ghost" style="width:auto;" onclick="runSearch()">Find</button></div>' +
         '<div id="results"></div>' +
         section("Today", o.today, "Nothing booked today.") +
+        '<button class="btn btn-ghost" style="margin:4px 0 6px;" onclick="offDay()">I can&#8217;t work today</button>' +
+        (newTime.length ? section("Waiting for a new time", newTime, "") : '') +
         section("Waiting for sign-off", o.waiting, "Nothing waiting.") +
         section("Coming up", o.upcoming, "Nothing in the next 30 days.");
     } else {
@@ -668,7 +672,7 @@
     var waText = "Hi " + (j.contact || j.name) + ", could you confirm today's clean is done? Tap here to sign it off: " + j.signingLink;
     var flash = state.flash ? '<p class="note" style="margin:0 0 10px;">' + esc(state.flash) + '</p>' : '';
     state.flash = "";
-    app(head + flash + missingCalendarCard(j) +
+    app(head + flash + newTimeCard(j) + missingCalendarCard(j) +
       '<button class="btn btn-ghost" style="margin-bottom:10px;" onclick="openEdit(\'' + esc(j.token) + '\')">Edit job (details, items, price, time)</button>' +
       '<div class="card" id="timer"><div class="pad-label">Time on job</div><div id="timer-body"></div></div>' +
       photosCard(j) +
@@ -697,6 +701,93 @@
     initCancel(j);
     renderTimer(j);
     initPhotos(j);
+  }
+
+  // ---------- "I can't work today" (FRE-223) ----------
+  // Every open job that day is kept, and its customer is emailed an apology
+  // with a link to pick a new time, free. The day is blocked online. The
+  // server finds the jobs again when you confirm, so nothing here is trusted.
+  var offState = null;
+
+  function isoPlusDays(n) {
+    var d = new Date(); d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+
+  function offDay() {
+    offState = { date: todayIso(), reason: "illness" };
+    app('<button class="btn-link back" onclick="loadHome()">&lsaquo; All jobs</button>' +
+      '<h1>Can&#8217;t work</h1>' +
+      '<div class="card">' +
+        '<p class="note" style="margin:0 0 10px;">Each customer that day is emailed an apology with a link to pick a new time, free of charge. Their jobs stay open until they do. The day is blocked so nobody else books it.</p>' +
+        '<label class="pad-label" for="off-date">Which day</label>' +
+        '<select id="off-date" onchange="offState.date=this.value;loadOffDay()">' +
+          '<option value="' + todayIso() + '">Today</option>' +
+          '<option value="' + isoPlusDays(1) + '">Tomorrow</option>' +
+        '</select>' +
+        '<label class="pad-label" for="off-reason" style="display:block;margin-top:12px;">Reason given to customers</label>' +
+        '<select id="off-reason" onchange="offState.reason=this.value">' +
+          '<option value="illness">Illness</option>' +
+          '<option value="vehicle">A problem with the vehicle</option>' +
+          '<option value="other">Don&#8217;t give a reason</option>' +
+        '</select>' +
+      '</div>' +
+      '<div id="off-jobs"><p class="loading">Loading&hellip;</p></div>');
+    loadOffDay();
+  }
+
+  function loadOffDay() {
+    var box = $("off-jobs");
+    box.innerHTML = '<p class="loading">Loading&hellip;</p>';
+    var asked = offState.date;
+    call("adminDayOffPreview", asked).then(function (r) {
+      if (!$("off-jobs") || offState.date !== asked) return;
+      if (!r.ok) { box.innerHTML = '<p class="note bad">' + esc(r.error) + '</p>'; return; }
+      var list = r.jobs.length
+        ? '<div class="card">' + r.jobs.map(function (j) {
+            return '<div class="paid-row"><span><strong>' + esc(j.when) + '</strong> ' + esc(j.reference) + '<br>' +
+              '<span class="sub">' + esc(j.name) + ', ' + esc(j.address) + (j.hasEmail ? '' : ' &middot; no email, you&#8217;ll need to call them') + '</span></span></div>';
+          }).join("") + '</div>'
+        : '<p class="empty">No jobs booked ' + esc(r.dayLabel) + '.</p>';
+      var label = r.jobs.length
+        ? "Cancel " + (r.jobs.length === 1 ? "this job" : "these " + r.jobs.length + " jobs") + " and email them"
+        : (r.blocked ? "" : "Block " + r.dayLabel);
+      box.innerHTML = '<h2>' + esc(r.dayLabel) + '</h2>' + list +
+        (r.blocked ? '<p class="note">This day is already blocked on the website.</p>' : '') +
+        (label ? '<div class="confirm-box" style="margin-bottom:10px;">' +
+            (r.jobs.length ? 'They&#8217;ll each get an email straight away. This can&#8217;t be undone, but you can still set a time for any of them with Edit job.' : 'Stops online bookings for the whole day.') +
+          '</div><button class="btn btn-primary" id="off-go" onclick="confirmOffDay()">' + esc(label) + '</button>' : '') +
+        '<p class="note" id="off-msg"></p>';
+    }).catch(function (err) {
+      if ($("off-jobs")) box.innerHTML = '<p class="note bad">Couldn&#8217;t load: ' + esc(err && err.message || err) + '</p>';
+    });
+  }
+
+  function confirmOffDay() {
+    var b = $("off-go"), m = $("off-msg");
+    b.disabled = true; b.textContent = "Working\u2026"; m.className = "note"; m.textContent = "";
+    call("adminDayOff", { date: offState.date, reason: offState.reason }).then(function (r) {
+      if (!r.ok) { b.disabled = false; b.textContent = "Try again"; m.className = "note bad"; m.textContent = r.error; return; }
+      var parts = [];
+      parts.push(r.count ? r.emailed + " of " + r.count + (r.count === 1 ? " customer" : " customers") + " emailed." : "No jobs that day.");
+      if (r.toContact.length) parts.push("Contact these yourself: " + r.toContact.join(", ") + ". Their numbers are in the email you've been sent.");
+      if (r.blocked) parts.push("The day is blocked on the website.");
+      $("off-jobs").innerHTML = '<div class="card"><p style="margin:0 0 6px;"><span class="pill done">Done</span></p>' +
+        '<p class="note" style="margin:0;">' + esc(parts.join(" ")) + '</p></div>' +
+        '<button class="btn btn-ghost" onclick="loadHome()">Back to jobs</button>';
+    }).catch(function (err) {
+      b.disabled = false; b.textContent = "Try again";
+      m.className = "note bad"; m.textContent = "Something went wrong: " + (err && err.message || err) + ". Check the jobs list before trying again.";
+    });
+  }
+
+  // A job from a day we cancelled, waiting for the customer to pick a new time.
+  function newTimeCard(j) {
+    if (!j.needsNewTime) return "";
+    return '<div class="card">' +
+      '<p style="margin:0 0 8px;"><span class="pill late">Needs a new time</span></p>' +
+      '<p class="note" style="margin:0;">You cancelled this day and asked them to pick a new time (' + esc(j.needsNewTime) + '). No reminders go out until it has one. If they tell you a time directly, use Edit job.</p>' +
+    '</div>';
   }
 
   // ---------- Booked before (FRE-203) ----------

@@ -205,11 +205,19 @@ function loadBackend(options) {
         getDescription() { return this.description; }, setDescription(d) { this.description = d; },
         setLocation(l) { this.location = l; }, setTime(s, e) { this.start = s; this.end = e; },
         getId() { return this.id; },
+        isAllDayEvent() { return !!this.allDay; },
         deleteEvent() { state.events = state.events.filter((x) => x !== this); },
       };
       state.events.push(ev);
       return ev;
     },
+    // A whole day (or days): start at midnight, end at midnight after the last day.
+    createAllDayEvent(title, start, end, opts) {
+      const ev = calendar.createEvent(title, start, end || new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1), opts);
+      ev.allDay = true;
+      return ev;
+    },
+    getEventById(id) { return state.events.filter((e) => e.id === id)[0] || null; },
     getEvents(from, to) { return state.events.filter((e) => e.start < to && e.end > from); },
     getEventsForDay(day) {
       const key = (d) => formatDate(d, "Europe/London", "yyyy-MM-dd");

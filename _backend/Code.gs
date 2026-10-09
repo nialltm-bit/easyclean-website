@@ -1389,7 +1389,7 @@ function sendTodaysReminders_() {
       var row = findBookingRow(item.ref);
       if (!row || !row.values.Email) return; // nothing to send to, skip
       var v = row.values;
-      if (v["Cancelled at"] || v["Completed at"]) return;
+      if (v["Cancelled at"] || v["Completed at"] || needsNewTime_(v)) return;
       if (v["Day-of reminder sent"] instanceof Date &&
           Utilities.formatDate(v["Day-of reminder sent"], TIMEZONE, "yyyy-MM-dd") === Utilities.formatDate(new Date(), TIMEZONE, "yyyy-MM-dd")) return;
       sendReminderEmail(v, item.start);
@@ -1422,7 +1422,7 @@ function sendDayBeforeReminders() {
       var row = findBookingRow(item.ref);
       if (!row) return;
       var v = row.values;
-      if (!v.Email || v["Cancelled at"] || v["Completed at"] || v["Day-before reminder sent"]) return;
+      if (!v.Email || v["Cancelled at"] || v["Completed at"] || v["Day-before reminder sent"] || needsNewTime_(v)) return;
       if (v.Timestamp instanceof Date && Date.now() - v.Timestamp.getTime() < 18 * 60 * 60 * 1000) return;
       sendDayBeforeEmail(v, item.start);
       if (!sheet) { sheet = getCustomerSheet(); header = ensureColumns(sheet, ["Day-before reminder sent"]); }
@@ -2878,6 +2878,7 @@ function adminJobSummary(v, start) {
     daysOverdue: due ? Math.floor((today - due) / 86400000) : 0,
     paidOn: fmtDay(v["Paid on"]),
     hasEmail: !!v.Email,
+    needsNewTime: String(v[NEW_TIME_COLUMN] || "").trim(),
     whatsappNumber: toWhatsAppNumber(signerPhone),
     signingLink: v["Job token"] ? publicSigningLink(v["Job token"]) : ""
   };
@@ -2931,7 +2932,7 @@ function adminGetOverview() {
 
   var todayKey = dayKey(now);
   var repeats = repeatReferences_(header, data);
-  var today = [], waiting = [], upcoming = [], unpaid = [], recentlyPaid = [];
+  var today = [], waiting = [], upcoming = [], unpaid = [], recentlyPaid = [], newTime = [];
   for (i = 1; i < data.length; i++) {
     v = rowToObject(header, data[i]);
     if (!v.Reference) continue;
@@ -2943,7 +2944,11 @@ function adminGetOverview() {
     if (repeats[v.Reference]) job.repeat = true;
     if (open) {
       if (!ev) job.calendarMissing = true;
-      if (!start) {
+      if (needsNewTime_(v)) {
+        // We cancelled the day; waiting for them to pick a new time (FRE-223).
+        job._sort = start ? start.getTime() : 0;
+        newTime.push(job);
+      } else if (!start) {
         // An older booking with no saved time and no event: needs a look.
         job._sort = 0;
         waiting.push(job);
@@ -2964,12 +2969,12 @@ function adminGetOverview() {
     }
   }
   var bySort = function (a, b) { return a._sort - b._sort; };
-  today.sort(bySort); waiting.sort(bySort); upcoming.sort(bySort); unpaid.sort(bySort);
+  today.sort(bySort); waiting.sort(bySort); upcoming.sort(bySort); unpaid.sort(bySort); newTime.sort(bySort);
   recentlyPaid.sort(function (a, b) { return b._paidSort - a._paidSort; });
   var strip = function (list) { return list.map(function (j) { delete j._sort; delete j._paidSort; return j; }); };
   return {
     ok: true,
-    today: strip(today), waiting: strip(waiting), upcoming: strip(upcoming),
+    today: strip(today), waiting: strip(waiting), upcoming: strip(upcoming), newTime: strip(newTime),
     unpaid: strip(unpaid), recentlyPaid: strip(recentlyPaid.slice(0, 10))
   };
 }
@@ -3500,6 +3505,8 @@ function syncBookingTimes_(sheet, rowIndex, v, ev) {
     var header = ensureColumns(sheet, START_COLUMNS.concat(["Changes"]));
     var writes = { "Starts at": start, "Ends at": end, "Booking time": fmtWhen(start) };
     if (savedStart && savedStart.getTime() !== start.getTime()) {
+      // A new time, so it no longer needs one (FRE-223).
+      if (needsNewTime_(v) && header.indexOf(NEW_TIME_COLUMN) !== -1) writes[NEW_TIME_COLUMN] = "";
       var log = String(v.Changes || "");
       writes.Changes = (log ? log + "; " : "") + Utilities.formatDate(new Date(), TIMEZONE, "d MMM") +
         ": moved in the calendar from " + fmtWhen(savedStart) + " to " + fmtWhen(start);
@@ -3597,7 +3604,7 @@ function adminRestoreEvent(token, force) {
 // For the morning check: open bookings with no calendar event, and jobs
 // done more than SIGNOFF_NUDGE_DAYS ago that still aren't signed off.
 function openBookingIssues_(now) {
-  var out = { missing: [], unsigned: [] };
+  var out = { missing: [], unsigned: [], newTime: [] };
   var sheet = getCustomerSheet();
   if (!sheet) return out;
   var data = sheet.getDataRange().getValues();
@@ -3618,7 +3625,10 @@ function openBookingIssues_(now) {
     var start = ev ? ev.getStartTime() : sheetStart_(v);
     var label = v.Reference + " (" + (start ? fmtWhen(start) : bookingTimeText(v) || "no time saved") + ")";
     if (!ev) out.missing.push(label);
-    if (start && now.getTime() - start.getTime() > SIGNOFF_NUDGE_DAYS * 86400000) out.unsigned.push(label);
+    var overdue = start && now.getTime() - start.getTime() > SIGNOFF_NUDGE_DAYS * 86400000;
+    // A job from a day we cancelled isn't waiting for sign-off, it's
+    // waiting for a new time (FRE-223).
+    if (overdue) (needsNewTime_(v) ? out.newTime : out.unsigned).push(label);
   });
   return out;
 }
@@ -3778,6 +3788,7 @@ function sendSiteContactDigest_(now) {
     var row = findBookingRow(item.ref);
     if (!row) return;
     var v = row.values;
+    if (needsNewTime_(v)) return; // we've cancelled that day (FRE-223)
     var link = siteContactWaLink_(v, item.start);
     if (!link) return;
     lines.push({
@@ -4148,6 +4159,8 @@ function adminUpdateJob(token, form) {
     };
     // A job moved to another day gets its reminders again on the new dates.
     if (dayChanged) { writes["Day-before reminder sent"] = ""; writes["Day-of reminder sent"] = ""; }
+    // A new time, so it no longer needs one (FRE-223).
+    if (timeChanged && needsNewTime_(v)) writes[NEW_TIME_COLUMN] = "";
     setRowValues_(sheet, row.rowIndex, header, writes);
     try { refreshSlotsCache(); } catch (err) { console.error("Cache refresh after editing a job failed: " + err); }
 
@@ -4254,6 +4267,9 @@ function notChangeableReason_(b, now) {
   if (v["Cancelled at"]) return "cancelled";
   if (v["Completed at"]) return "completed";
   if (validDate_(v["Started at"])) return "started";
+  // We cancelled the day and asked them to pick a new time: the old time
+  // having passed doesn't stop them (FRE-223).
+  if (needsNewTime_(v)) return null;
   if (b.start && b.start.getTime() <= now.getTime()) return "started";
   return null;
 }
@@ -4332,7 +4348,8 @@ function getPublicBooking(token) {
     // No calendar event (deleted by hand): the page says to message us.
     canChange: !reason && !!b.start,
     notChangeableReason: reason,
-    movesLeft: Math.max(0, MAX_ONLINE_MOVES - onlineMovesSoFar_(v)),
+    // A move after we cancelled the day doesn't count (FRE-223).
+    movesLeft: needsNewTime_(v) ? Math.max(1, MAX_ONLINE_MOVES - onlineMovesSoFar_(v)) : Math.max(0, MAX_ONLINE_MOVES - onlineMovesSoFar_(v)),
     cancelDeadline: isAgent ? null : cancelDeadlineIso_(v),
     earlyStartGiven: isAgent ? false : earlyStartGiven_(v)
   };
@@ -4345,7 +4362,7 @@ function getRescheduleSlots(token) {
   var reason = notChangeableReason_(b, new Date());
   if (reason) return { ok: false, error: reason };
   if (!b.start) return { ok: false, error: "not_found" };
-  if (onlineMovesSoFar_(b.v) >= MAX_ONLINE_MOVES) return { ok: false, error: "no_moves_left" };
+  if (!needsNewTime_(b.v) && onlineMovesSoFar_(b.v) >= MAX_ONLINE_MOVES) return { ok: false, error: "no_moves_left" };
   var slots = computeSlots_({ ignoreReference: b.v.Reference, lengthMins: jobLengthMins_(b), skipStartMs: b.start.getTime() });
   slots.forEach(function (s) { s.timeLabel = s.timeLabel.replace("AM", "am").replace("PM", "pm"); });
   return { ok: true, slots: slots };
@@ -4366,7 +4383,7 @@ function cancelBookingPublic(data) {
     if (why) return { ok: false, error: why };
     var v = b.v;
     var whenStr = b.start ? fmtWhen(b.start) : bookingTimeText(v);
-    var late = !!b.start && isLateCancellation(b.start, now);
+    var late = !!b.start && !needsNewTime_(v) && isLateCancellation(b.start, now);
     var res = cancelJobLocked_(v["Job token"], {
       row: b.row,
       reason: "customer",
@@ -4426,7 +4443,8 @@ function rescheduleBookingPublic(data) {
     };
     if (newStart.getTime() === b.start.getTime()) return reply(b.start); // nothing to move
     var moves = onlineMovesSoFar_(v);
-    if (moves >= MAX_ONLINE_MOVES) return { ok: false, error: "no_moves_left" };
+    var afterOurCancel = needsNewTime_(v); // free, and doesn't count (FRE-223)
+    if (!afterOurCancel && moves >= MAX_ONLINE_MOVES) return { ok: false, error: "no_moves_left" };
 
     var newEnd = new Date(newStart.getTime() + jobLengthMins_(b) * 60000);
     if (!isOfferableSlot(newStart) || clashesFor_(newStart, newEnd, b.ev).length) return { ok: false, error: "slot_taken" };
@@ -4444,13 +4462,15 @@ function rescheduleBookingPublic(data) {
     else createEventForRow_(v, newStart, newEnd); // its event had been deleted by hand
     var dayChanged = Utilities.formatDate(oldStart, TIMEZONE, "yyyy-MM-dd") !== newDay;
 
-    var entry = Utilities.formatDate(now, TIMEZONE, "d MMM") + ": moved online by customer from " + fmtWhen(oldStart) + " to " + fmtWhen(newStart);
+    var entry = Utilities.formatDate(now, TIMEZONE, "d MMM") + ": moved online by customer " + (afterOurCancel ? "(after we cancelled) " : "") +
+      "from " + fmtWhen(oldStart) + " to " + fmtWhen(newStart);
     try {
       var sheet = getCustomerSheet();
       var header = ensureColumns(sheet, ["Changes", ONLINE_MOVES_COLUMN, EARLY_START_COLUMN].concat(START_COLUMNS));
       var log = String(v.Changes || "");
       var writes = { "Booking time": fmtWhen(newStart), "Starts at": newStart, "Ends at": newEnd, "Changes": (log ? log + "; " : "") + entry };
-      writes[ONLINE_MOVES_COLUMN] = moves + 1;
+      writes[ONLINE_MOVES_COLUMN] = afterOurCancel ? moves : moves + 1;
+      if (afterOurCancel) writes[NEW_TIME_COLUMN] = "";
       if (newlyGiven) writes[EARLY_START_COLUMN] = EARLY_START_VALUES.moved;
       // A job moved to another day gets its reminders again on the new dates.
       if (dayChanged) {
@@ -4481,7 +4501,8 @@ function rescheduleBookingPublic(data) {
       "Where: " + v.Address,
       "What: " + v.Items + " (" + v.Total + ")",
       newlyGiven ? "They ticked the box asking us to clean within their 14-day cancellation period." : null,
-      "Online moves used: " + (moves + 1) + " of " + MAX_ONLINE_MOVES + ".",
+      afterOurCancel ? "This was the new time after we cancelled the day, so it doesn't count as one of their online moves."
+                     : "Online moves used: " + (moves + 1) + " of " + MAX_ONLINE_MOVES + ".",
       "",
       "Your calendar is updated. " + (v.Email ? "They've been emailed the new time." : "They have no email address, so nothing was sent to them.")
     ].filter(function (x) { return x !== null; }).join("\n"));
@@ -4625,6 +4646,203 @@ function adminRemoveBlock(id) {
   ev.deleteEvent();
   try { refreshSlotsCache(); } catch (err) { console.error("Cache refresh after removing a block failed: " + err); }
   return { ok: true };
+}
+
+// ---- "I can't work today": move a whole day's jobs (FRE-223) ----
+// For illness or a breakdown. Every open job that day is kept, marked
+// "Needs a new time", and its customer is emailed an apology with the
+// Change or cancel link to pick a new time. No fee, ever: it's our
+// cancellation. The day is blocked so nobody else books it, and Niall gets
+// one email listing who was told and who still needs a call.
+//
+// While a job needs a new time:
+//   - its reminders and the site contact message don't go out;
+//   - the customer can move it online even though its old time has
+//     passed, and that move doesn't count towards MAX_ONLINE_MOVES;
+//   - it's listed under "Waiting for a new time" in the admin app, not
+//     "Waiting for sign-off", and the morning check lists it once its old
+//     day is more than SIGNOFF_NUDGE_DAYS behind.
+// Any new time (online, Edit job, or a drag in Google Calendar) clears it.
+var NEW_TIME_COLUMN = "Needs a new time";
+var OFF_DAY_REASONS = {
+  illness: { label: "illness", why: "because of illness" },
+  vehicle: { label: "vehicle problem", why: "because of a problem with our vehicle" },
+  other: { label: "", why: "" }
+};
+var OFF_DAY_MAX_AHEAD_DAYS = 30;
+
+function needsNewTime_(v) {
+  return !!String(v[NEW_TIME_COLUMN] || "").trim();
+}
+
+// yyyy-MM-dd -> a Date for that day, if it's today up to 30 days ahead.
+function offDayDate_(iso, now) {
+  var day = parseIsoDate_(iso);
+  if (!day || dayKey(day) !== iso) return null;
+  var ahead = calendarDaysBetween_(now, day);
+  return ahead >= 0 && ahead <= OFF_DAY_MAX_AHEAD_DAYS ? day : null;
+}
+
+// Open jobs on that day that haven't been started, with their start time.
+// The calendar's time wins; a booking whose event was deleted by hand
+// counts if its saved time is on that day.
+function offDayJobs_(day) {
+  var sheet = getCustomerSheet();
+  if (!sheet) return [];
+  var dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+  var dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+  var events = bookingEventsByRef_(dayStart, dayEnd);
+  var key = dayKey(day);
+  var data = sheet.getDataRange().getValues();
+  var header = data[0];
+  var jobs = [];
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (!v.Reference || v["Cancelled at"] || v["Completed at"] || validDate_(v["Started at"]) || needsNewTime_(v)) continue;
+    var ev = events[v.Reference];
+    var start = ev && dayKey(ev.getStartTime()) === key ? ev.getStartTime() : null;
+    var end = start ? ev.getEndTime() : null;
+    if (!start) {
+      var saved = sheetStart_(v);
+      if (!saved || dayKey(saved) !== key || findBookingEvent_(v.Reference, saved)) continue;
+      start = saved;
+      end = sheetEnd_(v);
+    }
+    jobs.push({ rowIndex: i + 1, v: v, start: start, end: end });
+  }
+  jobs.sort(function (a, b) { return a.start.getTime() - b.start.getTime(); });
+  return jobs;
+}
+
+function dayIsBlocked_(day) {
+  var dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate());
+  var dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1);
+  return CalendarApp.getDefaultCalendar().getEvents(dayStart, dayEnd).some(function (ev) {
+    return isBlockEvent_(ev) && ev.isAllDayEvent();
+  });
+}
+
+// Admin app: what pressing the button would do for that day.
+function adminDayOffPreview(iso) {
+  requireOwner();
+  var day = offDayDate_(iso, new Date());
+  if (!day) return { ok: false, error: "Pick today or a day in the next " + OFF_DAY_MAX_AHEAD_DAYS + " days." };
+  var jobs = offDayJobs_(day).map(function (j) {
+    var v = j.v, isAgent = v.Channel === "Agent/Landlord";
+    return {
+      reference: String(v.Reference), when: fmtWhen(j.start),
+      name: String(isAgent ? (v["Business name"] || v.Name) : v.Name || ""),
+      address: String(v.Address || ""), hasEmail: !!v.Email
+    };
+  });
+  return { ok: true, dayLabel: Utilities.formatDate(day, TIMEZONE, "EEEE d MMMM"), jobs: jobs, blocked: dayIsBlocked_(day) };
+}
+
+// Admin app: does it. opts: { date: "yyyy-MM-dd", reason: "illness" | "vehicle" | "other" }
+function adminDayOff(opts) {
+  requireOwner();
+  opts = opts || {};
+  var now = new Date();
+  var day = offDayDate_(opts.date, now);
+  if (!day) return { ok: false, error: "Pick today or a day in the next " + OFF_DAY_MAX_AHEAD_DAYS + " days." };
+  var reason = OFF_DAY_REASONS[opts.reason] || OFF_DAY_REASONS.other;
+  var dayLabel = Utilities.formatDate(day, TIMEZONE, "EEE d MMM");
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { return { ok: false, error: "Busy, try again in a moment." }; }
+  try {
+    var sheet = getCustomerSheet();
+    if (!sheet) return { ok: false, error: "The customer sheet isn't set up." };
+    var jobs = offDayJobs_(day);
+    var header = ensureColumns(sheet, [NEW_TIME_COLUMN, MANAGE_TOKEN_COLUMN, "Changes"].concat(START_COLUMNS));
+    var stamp = Utilities.formatDate(now, TIMEZONE, "d MMM");
+    var lines = [], emailed = 0, toContact = [];
+    jobs.forEach(function (j) {
+      var v = j.v, isAgent = v.Channel === "Agent/Landlord";
+      var who = isAgent ? (v["Business name"] || v.Name) : v.Name;
+      var line = fmtWhen(j.start) + ", " + v.Reference + ", " + who + ", " + v.Address;
+      try {
+        var writes = {};
+        writes[NEW_TIME_COLUMN] = "Asked " + stamp + (reason.label ? " (" + reason.label + ")" : "");
+        // Keep the old time in the sheet, so a later drag in the calendar is
+        // noticed and clears this.
+        if (!sheetStart_(v)) { writes["Starts at"] = j.start; if (j.end) writes["Ends at"] = j.end; }
+        if (!isPlausibleToken(v[MANAGE_TOKEN_COLUMN])) {
+          writes[MANAGE_TOKEN_COLUMN] = newJobToken();
+          sheet.getRange(j.rowIndex, header.indexOf(MANAGE_TOKEN_COLUMN) + 1).setNumberFormat("@");
+        }
+        var log = String(v.Changes || "");
+        writes.Changes = (log ? log + "; " : "") + stamp + ": we cancelled " + fmtWhen(j.start) +
+          (reason.label ? " (" + reason.label + ")" : "") + ", asked them to pick a new time";
+        setRowValues_(sheet, j.rowIndex, header, writes);
+        Object.keys(writes).forEach(function (k) { v[k] = writes[k]; });
+      } catch (err) {
+        noteProblem_("Marking " + v.Reference + " as needing a new time failed", err);
+        lines.push(line + "\n  NOT DONE: couldn't update the sheet (" + err + "). Contact them yourself.");
+        toContact.push(v.Reference);
+        return;
+      }
+      var how;
+      if (v.Email) {
+        try { sendDayOffEmail_(v, j.start, reason); emailed++; how = "Emailed " + v.Email + "."; }
+        catch (err) {
+          noteProblem_("Day off email failed for " + v.Reference, err);
+          how = "The email didn't send (" + err + "). Call or WhatsApp them on " + phoneText(v.Phone) + ".";
+          toContact.push(v.Reference);
+        }
+      } else {
+        how = "No email address. Call or WhatsApp them on " + phoneText(v.Phone) + ".";
+        toContact.push(v.Reference);
+      }
+      if (isAgent && v["Site contact name"] && v["Site contact phone"]) {
+        how += " Also tell the site contact, " + v["Site contact name"] + ", on " + phoneText(v["Site contact phone"]) + ".";
+      }
+      lines.push(line + "\n  " + how);
+    });
+
+    var blocked = dayIsBlocked_(day);
+    if (!blocked) {
+      var title = "Blocked: can't work" + (reason.label ? " (" + reason.label + ")" : "");
+      CalendarApp.getDefaultCalendar().createAllDayEvent(title, new Date(day.getFullYear(), day.getMonth(), day.getDate()),
+        new Date(day.getFullYear(), day.getMonth(), day.getDate() + 1), { description: BLOCK_TAG });
+    }
+    try { refreshSlotsCache(); } catch (err) { noteProblem_("Refreshing available times after a day off failed", err); }
+
+    notifyOwner("Day off " + dayLabel + ": " + jobs.length + (jobs.length === 1 ? " job" : " jobs") + " to rebook",
+      (jobs.length
+        ? "These jobs are now waiting for a new time. Each customer has been asked to pick one with the Change or cancel link, free of charge.\n\n" +
+          lines.join("\n\n") + "\n\n"
+        : "There were no jobs booked that day.\n\n") +
+      (blocked ? "The day was already blocked on the website." : "The day is now blocked on the website. Remove it under Time off in the admin app if you can work after all.") +
+      "\n\nThey're listed under \"Waiting for a new time\" in the admin app. If someone tells you a new time directly, use Edit job.");
+    return { ok: true, count: jobs.length, emailed: emailed, toContact: toContact, blocked: !blocked };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function sendDayOffEmail_(v, start, reason) {
+  var isAgent = v.Channel === "Agent/Landlord";
+  var name = isAgent ? (v.Name || v["Business name"]) : v.Name;
+  var manageUrl = manageLink_(v[MANAGE_TOKEN_COLUMN]);
+  var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" +
+    encodeURIComponent("Hi EasyClean Somerset, about a new time for my booking. Ref: " + v.Reference);
+  var sorry = "Sorry, " + (reason.why ? reason.why + " " : "") + "we can't make " +
+    (isAgent ? "the clean at " + v.Address : "your clean") + " on " + fmtWhen(start) + " (ref " + v.Reference + ").";
+  var ask = manageUrl
+    ? "Please pick a new time that suits you using the button below. There's no charge, and it doesn't use up any of your online changes. If you'd rather cancel, you can do that from the same page, also free."
+    : "Please reply to this email or WhatsApp us with a few times that suit you, and we'll book you back in. There's no charge.";
+  var text = "Hi " + name + ",\n\n" + sorry + "\n\n" + ask + "\n\n" +
+    (manageUrl ? "Pick a new time: " + manageUrl + "\n\nOr reply to this email, or WhatsApp us: " + waLink : "WhatsApp us: " + waLink) +
+    "\n\nSorry again,\nEasyClean Somerset";
+  sendCustomerEmail_(v.Email, "We need to move your clean on " + Utilities.formatDate(start, TIMEZONE, "EEE d MMM") + " (" + v.Reference + ")", text, {
+    htmlBody: buildSimpleEmailHtml({
+      name: name,
+      heading: "We need to move your clean",
+      paragraphs: [{ text: sorry }, { text: ask }, { text: "You can also reply to this email, or", link: { label: "message us on WhatsApp", url: waLink } }],
+      button: manageUrl ? { text: "Pick a new time", url: manageUrl } : null
+    }),
+    name: "EasyClean Somerset"
+  });
 }
 
 // ---- Unpaid invoices: reminder to the payer, and Niall's Monday digest ----
@@ -5724,6 +5942,12 @@ function dailyHealthCheck_(opts) {
       (list.length === 1 ? "isn't" : "aren't") + " signed off yet, so " + (list.length === 1 ? "it hasn't" : "they haven't") + " been invoiced: " + list.join(", ") + ". " +
       "They're under Waiting for sign-off in the admin app.";
   });
+  check("Couldn't check the jobs waiting for a new time", function () {
+    var list = openNow().newTime;
+    if (!list.length) return "";
+    return (list.length === 1 ? "1 booking from a day you cancelled still has" : list.length + " bookings from days you cancelled still have") +
+      " no new time: " + list.join(", ") + ". Message them, set a time with Edit job, or cancel " + (list.length === 1 ? "it" : "them") + " so there's a record.";
+  });
   ["Consumer", "Agent/Landlord"].forEach(function (ch) {
     check("Couldn't read the marketing tick box on " + priceListPage(ch), function () {
       var live = liveConsentLabel_(priceListPage(ch));
@@ -5769,7 +5993,7 @@ function dailyHealthCheck_(opts) {
       "More detail is in Apps Script under Executions.";
   } else if (isMonday || opts.force) {
     subject = "Booking system check: all fine";
-    body = "This morning's check found nothing wrong: booking times, prices, service area, email allowance, scheduled jobs, customer sheet and its backup, settings, bookings against the calendar and jobs waiting for sign-off.\n\n" +
+    body = "This morning's check found nothing wrong: booking times, prices, service area, email allowance, scheduled jobs, customer sheet and its backup, settings, bookings against the calendar, jobs waiting for sign-off and jobs waiting for a new time.\n\n" +
       "You get this note once a week. If it stops arriving, the morning job has stopped: run setUpDailyReminders once to restart it.";
   } else {
     return { sent: false, issues: issues, events: events };

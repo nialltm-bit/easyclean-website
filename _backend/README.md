@@ -80,6 +80,13 @@ The daily trigger (`sendDayOfReminders`, around 7am) starts with a backup of the
   - Unsubscribes: when someone replies STOP, open any of their jobs in the admin app and tap "They asked to stop: unsubscribe them". That sets `Unsubscribed on` for every booking with their email. Ticking the box on a later booking counts as fresh consent.
   - Before sending any marketing, run `refreshMarketingList` from the function dropdown. It rebuilds the "Marketing list" tab: one row per email that opted in and hasn't unsubscribed since, with the words they agreed to and when. Send only to that list, and every marketing email must say how to unsubscribe (for now, "reply STOP"). A one-click unsubscribe link would need a small page on the website; it isn't built yet.
 
+## Can't work a day (FRE-223)
+
+- **The button:** "I can't work today" under Today in the admin app. Pick today or tomorrow and the reason customers are given (illness, a vehicle problem, or none). It lists the jobs first; nothing happens until you press the second button (`adminDayOffPreview`, then `adminDayOff`).
+- **What it does:** every open job that day that hasn't been started is kept, not cancelled. Its `Needs a new time` column says when you asked and why, and `Changes` notes it. Each customer with an email gets a "We need to move your clean" email with a Pick a new time button (the Change or cancel link; a job without one gets one). The day is blocked under Time off unless it already was. You get one email listing who was told, who has no email (with their number), and agent site contacts to tell.
+- **While a job needs a new time:** no day-before or morning reminder and no site contact message. The customer can move it online even though its old time has passed, free, and that move doesn't count towards their 2 online moves. They can cancel it online too (no fee, no late-notice line). It's under "Waiting for a new time" in the admin app, not "Waiting for sign-off". Three days after its old date, the morning check lists it so you can chase them or cancel it.
+- **It's cleared by any new time:** the customer moving it online, Edit job, or a drag in Google Calendar.
+
 ## Invoices and the Agencies tab
 
 - **Late payment (FRE-195):** agent invoices that are paid by bank transfer (including £25 fee invoices to agents) end with a line saying statutory interest at 8% above the Bank of England base rate may be charged, plus fixed compensation under the Late Payment of Commercial Debts (Interest) Act 1998: £40 under £1,000, £70 under £10,000, £100 above (`lateFeeCompensation_`). Homeowner invoices never have it (the Act is business to business). The base rate isn't written as a number, since it changes.
@@ -109,10 +116,15 @@ All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any o
 - `node _tests/invoices-agencies.test.js` checks the late-payment line, agency name matching and `Same as`, and the job date on jobs signed off later (FRE-195, FRE-203). It needs no setup.
 - `node _tests/customers-and-contacts.test.js` checks jobs dragged in the calendar, repeat customers, the site contact email and link, and marketing consent, unsubscribes and the marketing list (FRE-203, FRE-195). It needs no setup.
 - `node _tests/backup-and-reviews.test.js` checks the daily backup, what it bins and never bins, the morning check's backup line, and the Google-then-Trustpilot review links (FRE-220, FRE-217). It needs no setup.
+- `node _tests/day-off.test.js` checks the "I can't work today" button: which jobs it picks, the emails, the block, reminders held back, rebooking online without using a move, and the morning check (FRE-223). It needs no setup.
 - `node _tests/dashboard.test.js` drives `Dashboard.html` in a browser against the same fake, so the page and `Code.gs` are checked together. It needs the Playwright setup from `booking.test.js`.
 - These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
 
 ## Last updated
+
+9 October 2026 (night):
+
+- "I can't work today" button in the admin app (FRE-223). Needs `Code.gs` and `Dashboard.html` pasted into Apps Script, and both deployments redeployed. Nothing to run: the `Needs a new time` column is added the first time it's used.
 
 9 October 2026 (evening):
 
