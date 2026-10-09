@@ -453,7 +453,7 @@ function setUpCustomerSheet() {
 function appendCustomerRow(data, reference, slotLabel, jobToken) {
   var sheet = getCustomerSheet();
   if (!sheet) return; // setUpCustomerSheet() hasn't been run yet
-  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", "Early start request", "Est. mins", MANAGE_TOKEN_COLUMN,
+  var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", EARLY_START_COLUMN, "Est. mins", MANAGE_TOKEN_COLUMN,
     "Starts at", "Ends at", REQUEST_ID_COLUMN]);
   var byHeader = {
     "Timestamp": new Date(),
@@ -477,7 +477,7 @@ function appendCustomerRow(data, reference, slotLabel, jobToken) {
     "Access": data.channel === "Agent/Landlord" ? accessLabel(data) : "",
     "Booked via": data.bookedVia || "Website",
     "Notes": data.notes || "",
-    "Early start request": earlyStartRecord_(data.cancellation),
+    "Customer OK'd starting within 14 days": earlyStartRecord_(data.cancellation),
     // The estimate the customer was shown, in minutes, so the job page's
     // timer can show actual against estimate (FRE-194).
     "Est. mins": parseMinsText_(data.estTime) || "",
@@ -768,11 +768,31 @@ function cancellationInfo_(data, start, bookedAt) {
   };
 }
 
-// What goes in the sheet's "Early start request" column.
+// The sheet column recording whether a homeowner asked us to start their
+// clean within their 14-day cancellation period (the tick box on the home
+// page). It was called "Early start request" until 9 Oct 2026; the old
+// column is renamed, and its values reworded, the first time the sheet's
+// columns are checked (see ensureColumns).
+var EARLY_START_COLUMN = "Customer OK'd starting within 14 days";
+var EARLY_START_OLD_COLUMN = "Early start request";
+var EARLY_START_VALUES = {
+  booked: "Yes, ticked when booking",
+  moved: "Yes, ticked when moving online",
+  notNeeded: "Not needed, clean is after 14 days",
+  missing: "No, ask the customer"
+};
+var EARLY_START_OLD_VALUES = {
+  "Yes, ticked at booking": EARLY_START_VALUES.booked,
+  "Yes, ticked when moving online": EARLY_START_VALUES.moved,
+  "Not needed (clean is after the 14 days)": EARLY_START_VALUES.notNeeded,
+  "Not given": EARLY_START_VALUES.missing
+};
+
+// What goes in that column for a new booking.
 function earlyStartRecord_(c) {
   if (!c) return "";
-  if (!c.within) return "Not needed (clean is after the 14 days)";
-  return c.earlyStart ? "Yes, ticked at booking" : "Not given";
+  if (!c.within) return EARLY_START_VALUES.notNeeded;
+  return c.earlyStart ? EARLY_START_VALUES.booked : EARLY_START_VALUES.missing;
 }
 
 // The cancellation information and model cancellation form for the
@@ -1818,12 +1838,42 @@ function ensureColumns(sheet, names) {
   var lastCol = sheet.getLastColumn();
   var headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
   names.forEach(function (name) {
+    if (headerRow.indexOf(name) === -1 && renameOldColumn_(sheet, headerRow, name)) return;
     if (headerRow.indexOf(name) === -1) {
       sheet.getRange(1, headerRow.length + 1).setValue(name);
       headerRow.push(name);
     }
   });
   return headerRow;
+}
+
+// Columns that have been renamed: new name -> { old name, old value -> new value }.
+var RENAMED_COLUMNS = {};
+RENAMED_COLUMNS[EARLY_START_COLUMN] = { from: EARLY_START_OLD_COLUMN, values: EARLY_START_OLD_VALUES };
+
+// If `name` is a renamed column and the sheet still has it under its old
+// name, renames that header cell and rewords its old values, so old and new
+// rows sit in one column. Returns true if it renamed one.
+function renameOldColumn_(sheet, headerRow, name) {
+  var rename = RENAMED_COLUMNS[name];
+  if (!rename) return false;
+  var col = headerRow.indexOf(rename.from);
+  if (col === -1) return false;
+  sheet.getRange(1, col + 1).setValue(name);
+  headerRow[col] = name;
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var range = sheet.getRange(2, col + 1, lastRow - 1, 1);
+    var changed = false;
+    var values = range.getValues().map(function (r) {
+      var next = rename.values[String(r[0])];
+      if (next === undefined) return [r[0]];
+      changed = true;
+      return [next];
+    });
+    if (changed) range.setValues(values);
+  }
+  return true;
 }
 
 // Everything the invoice PDF and the email need to know about which kind of
@@ -2633,7 +2683,7 @@ function adminGetOverview() {
   var sheet = getCustomerSheet();
   if (!sheet) return { ok: false, error: "no_sheet" };
   ensureJobTokens(sheet);
-  ensureColumns(sheet, COMPLETION_COLUMNS);
+  ensureColumns(sheet, COMPLETION_COLUMNS.concat([EARLY_START_COLUMN]));
   var data = sheet.getDataRange().getValues();
   var header = data[0];
 
@@ -3639,7 +3689,8 @@ function cancelDeadlineIso_(v) {
 }
 
 function earlyStartGiven_(v) {
-  return /^Yes/.test(String(v["Early start request"] || ""));
+  // The old column name is read too, until the sheet has been renamed.
+  return /^Yes/.test(String(v[EARLY_START_COLUMN] || v[EARLY_START_OLD_COLUMN] || ""));
 }
 
 // "Mon 12 Oct at 9:00am"
@@ -3805,11 +3856,11 @@ function rescheduleBookingPublic(data) {
     var entry = Utilities.formatDate(now, TIMEZONE, "d MMM") + ": moved online by customer from " + fmtWhen(oldStart) + " to " + fmtWhen(newStart);
     try {
       var sheet = getCustomerSheet();
-      var header = ensureColumns(sheet, ["Changes", ONLINE_MOVES_COLUMN, "Early start request"].concat(START_COLUMNS));
+      var header = ensureColumns(sheet, ["Changes", ONLINE_MOVES_COLUMN, EARLY_START_COLUMN].concat(START_COLUMNS));
       var log = String(v.Changes || "");
       var writes = { "Booking time": fmtWhen(newStart), "Starts at": newStart, "Ends at": newEnd, "Changes": (log ? log + "; " : "") + entry };
       writes[ONLINE_MOVES_COLUMN] = moves + 1;
-      if (newlyGiven) writes["Early start request"] = "Yes, ticked when moving online";
+      if (newlyGiven) writes[EARLY_START_COLUMN] = EARLY_START_VALUES.moved;
       // A job moved to another day gets its reminders again on the new dates.
       if (dayChanged) {
         if (header.indexOf("Day-before reminder sent") !== -1) writes["Day-before reminder sent"] = "";
@@ -5151,7 +5202,7 @@ function sendNewBookingAlert(data, reference, jobToken, start, priced) {
   if (data.referralCode) lines.push("Referral/offer code: " + data.referralCode);
   if (data.agencyId) lines.push("Agent's reference: " + data.agencyId);
   if (data.notes) lines.push("Notes: " + data.notes);
-  if (data.cancellation) lines.push("Early start request: " + earlyStartRecord_(data.cancellation));
+  if (data.cancellation) lines.push("OK'd starting within 14 days: " + earlyStartRecord_(data.cancellation));
   if (data.cancellation && data.cancellation.within && !data.cancellation.earlyStart) {
     lines.push("", "NOTE: this clean is within their 14-day cancellation period, but they didn't tick the box asking us to start early (the page may have been open from before it was added). " +
       "As it stands they could cancel up to " + data.cancellation.deadline + " and pay nothing for work done. Worth asking them to confirm by message that they want it done early.");

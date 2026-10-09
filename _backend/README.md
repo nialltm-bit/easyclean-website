@@ -34,7 +34,7 @@ Check these before changing either side.
   - **Emails ask for the extras (FRE-209):** the booking form keeps parking, notes and the code under a closed "Anything else?" link, so many customers leave them empty. When `notes` is empty (it already holds the parking answer), the confirmation and day-before emails add a line asking them to reply with parking, pets, gate codes or stains. The morning-of reminder doesn't.
   - **Agent page:** the business name is optional. If it's blank, Code.gs uses the person's name, the same as the admin app does for a private landlord.
   - **One-time ID (`requestId`, FRE-203 and FRE-6):** the page can send a random `requestId` with each booking: 16 to 64 letters, numbers, `-` or `_`. It makes one per booking attempt and sends the same one again if it retries after a dropped connection. If Code.gs has already booked that `requestId`, it doesn't book again: it answers `{ ok: true, reference, repeat: true }` with the first booking's reference, even if that time now shows as taken. An ID of the wrong shape is ignored. Bookings without one still work. It's kept in the sheet's `Request ID` column (and cached for 6 hours).
-  - **Early start (home page only):** `earlyStart` is `true` when the customer ticked the box asking us to clean within their 14-day cancellation period. The page shows the box when the chosen time is within 14 days of today, and Code.gs works that out again with `CANCEL_DAYS`. Both use UK dates. A booking without the tick is never refused: Code.gs records "Not given" and flags it in the new-booking email.
+  - **Early start (home page only):** `earlyStart` is `true` when the customer ticked the box asking us to clean within their 14-day cancellation period. The page shows the box when the chosen time is within 14 days of today, and Code.gs works that out again with `CANCEL_DAYS`. Both use UK dates. A booking without the tick is never refused: Code.gs records "No, ask the customer" and flags it in the new-booking email. The answer goes in the sheet column "Customer OK'd starting within 14 days" (it was "Early start request" until 9 October 2026).
 - **Prices:**
   - **Where Code.gs reads them:** it doesn't trust the price the page sends. It reads the price rows on the built `index.html` and `agents.html` pages, in `parsePriceRows`.
   - **What it looks for:** each row must stay as `<div class="item-row" data-item="..." data-price="..." data-mins="...">`, with `class="item-row"` exactly. An extra class or a renamed attribute stops the price check finding the rows.
@@ -81,6 +81,10 @@ All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any o
 - These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
 
 ## Last updated
+
+9 October 2026:
+
+- The sheet column "Early start request" is now "Customer OK'd starting within 14 days", with plainer values: "Yes, ticked when booking", "Yes, ticked when moving online", "Not needed, clean is after 14 days" and "No, ask the customer". The existing column is renamed in place and its old values reworded the first time the admin app opens (or the next booking), so old and new rows stay in one column. `Code.gs` only. Nothing to run.
 
 8 October 2026 (night):
 

@@ -180,7 +180,8 @@ const ownerMails = (b) => b.state.emails.filter((e) => e.to === "owner@example.c
   check("the day after the deadline needs no box", r.ok === true, r);
   r = c.rescheduleBookingPublic({ t: T1, date: "2026-10-15", time: "10:00", earlyStart: true });
   check("on the deadline with the box ticked: ok", r.ok === true, r);
-  check("the sheet records it", b.row("EC-10001")["Early start request"] === "Yes, ticked when moving online", b.row("EC-10001")["Early start request"]);
+  check("the sheet records it, in the renamed column", b.row("EC-10001")["Customer OK'd starting within 14 days"] === "Yes, ticked when moving online" &&
+    !("Early start request" in b.row("EC-10001")), b.row("EC-10001"));
   check("and the page now knows", c.getPublicBooking(T1).earlyStartGiven === true);
   check("your alert mentions it", ownerMails(b).some((m) => m.body.indexOf("ticked the box") !== -1));
 })();
@@ -329,6 +330,53 @@ const ownerMails = (b) => b.state.emails.filter((e) => e.to === "owner@example.c
   check("and leaves cancelled, signed-off and existing ones alone",
     !b.row("EC-30002")["Manage token"] && !b.row("EC-30003")["Manage token"] && b.row("EC-30004")["Manage token"] === T4);
   check("running it again adds none", c.setUpManageTokens() === 0);
+})();
+
+// ================= The renamed column =================
+(function renamedColumn() {
+  console.log("\n== \"Early start request\" renamed to \"Customer OK'd starting within 14 days\"");
+  const b = setup(); const c = b.ctx;
+  const NEW = "Customer OK'd starting within 14 days", OLD = "Early start request";
+  homeBooking(b, { [OLD]: "Yes, ticked at booking" });
+  b.addBooking({ Reference: "EC-10002", [OLD]: "Not given" }, "2026-10-13T08:00:00Z");
+  b.addBooking({ Reference: "EC-10003", [OLD]: "Not needed (clean is after the 14 days)" }, "2026-10-26T08:00:00Z");
+  b.addBooking({ Reference: "EC-10004", [OLD]: "Yes, ticked when moving online" }, "2026-10-14T08:00:00Z");
+  b.addBooking({ Reference: "EC-10005", [OLD]: "" }, "2026-10-15T08:00:00Z");
+
+  check("before the rename, the old column still counts", c.getPublicBooking(T1).earlyStartGiven === true);
+  c.adminGetOverview();
+  const header = b.sheet().rows[0];
+  check("opening the admin app renames the column in place", header.indexOf(NEW) !== -1 && header.indexOf(OLD) === -1, header);
+  check("no second column is added", header.filter((h) => h === NEW).length === 1);
+  check("old values are reworded",
+    b.row("EC-10001")[NEW] === "Yes, ticked when booking" && b.row("EC-10002")[NEW] === "No, ask the customer" &&
+    b.row("EC-10003")[NEW] === "Not needed, clean is after 14 days" && b.row("EC-10004")[NEW] === "Yes, ticked when moving online" &&
+    b.row("EC-10005")[NEW] === "", ["EC-10001", "EC-10002", "EC-10003", "EC-10004", "EC-10005"].map((r) => b.row(r)[NEW]));
+  check("and still read the same way", c.getPublicBooking(T1).earlyStartGiven === true);
+  c.adminGetOverview();
+  check("running again changes nothing", b.sheet().rows[0].join("|") === header.join("|") && b.row("EC-10001")[NEW] === "Yes, ticked when booking");
+
+  // A new website booking writes the new wording.
+  const slot = c.getAvailableSlots()[3];
+  const r = c.createBooking({
+    startTime: slot.start, name: "New Person", phone: "07000 000009", email: "new@example.com", address: "9 Station Road", postcode: "BA3 3AA",
+    items: "1× Medium room: £45", total: "£45", estTime: "~1h 25m", payment: "Cash", channel: "Consumer", slotLabel: "x",
+    lineItems: [{ item: "Medium room", qty: 1 }], earlyStart: true,
+  });
+  check("a new booking goes in the renamed column", r.ok && b.row(r.reference)[NEW] === "Yes, ticked when booking", r.ok && b.row(r.reference)[NEW]);
+  check("still only one such column", b.sheet().rows[0].filter((h) => h === NEW || h === OLD).length === 1);
+  check("your new-booking email uses the new wording", ownerMails(b).some((m) => m.body.indexOf("OK'd starting within 14 days: Yes, ticked when booking") !== -1));
+  const r2 = c.createBooking({
+    startTime: c.getAvailableSlots()[6].start, name: "Late Page", phone: "07000 000010", email: "late@example.com", address: "10 Station Road", postcode: "BA3 3AA",
+    items: "1× Medium room: £45", total: "£45", estTime: "~1h 25m", payment: "Cash", channel: "Consumer", slotLabel: "x",
+    lineItems: [{ item: "Medium room", qty: 1 }],
+  });
+  check("no tick inside the 14 days: No, ask the customer", r2.ok && b.row(r2.reference)[NEW] === "No, ask the customer", r2.ok && b.row(r2.reference)[NEW]);
+
+  // A sheet that never had the old column just gets the new one.
+  const fresh = setup();
+  fresh.ctx.adminGetOverview();
+  check("a sheet without the old column gets the new one", fresh.sheet().rows[0].indexOf(NEW) !== -1 && fresh.sheet().rows[0].indexOf(OLD) === -1);
 })();
 
 console.log(failures ? "\n" + failures + " FAILED" : "\nALL PASSED");
