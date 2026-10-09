@@ -297,7 +297,19 @@ const ownerMails = (b) => b.state.emails.filter((e) => e.to === "owner@example.c
   check("day-before reminder: button", mail.html.indexOf('href="' + link + '"') !== -1 && mail.body.indexOf("Do it online: " + link) !== -1);
   c.sendReminderEmail(b.row("EC-10001"), b.date("2026-10-12T08:00:00Z"));
   mail = lastTo(b, "sam@example.com");
-  check("morning reminder: button", mail.html.indexOf('href="' + link + '"') !== -1 && mail.body.indexOf("Do it online: " + link) !== -1);
+  check("morning reminder: no Change or cancel button on the day", mail.html.indexOf("my-booking.html") === -1 && mail.body.indexOf("my-booking.html") === -1 &&
+    mail.html.indexOf(">WhatsApp us<") !== -1 && mail.body.indexOf("Need to change anything? Just reply to this email or WhatsApp us: https://wa.me/") !== -1);
+
+  // Booking updated (an edit in the admin app, with "email them" ticked)
+  const form = c.adminGetJobForEdit(v["Job token"]);
+  form.lines = form.lines.map((l) => ({ desc: l.desc, qty: l.qty, unit: l.unit, mins: l.mins }));
+  form.time = "10:00"; form.emailCustomer = true;
+  check("booking edited", c.adminUpdateJob(v["Job token"], form).ok === true);
+  mail = lastTo(b, "sam@example.com");
+  check("booking updated: has the button", /^Booking updated/.test(mail.subject) && mail.html.indexOf('href="' + link + '"') !== -1 && mail.html.indexOf(">Change or cancel<") !== -1, mail.subject);
+  check("booking updated: WhatsApp still there", mail.html.indexOf("message us on WhatsApp") !== -1);
+  check("booking updated text: link", mail.body.indexOf("do it online: " + link) !== -1 && mail.body.indexOf("WhatsApp us: https://wa.me/") !== -1);
+  check("booking updated: still has the new details", mail.body.indexOf("When: Mon 12 Oct") !== -1, mail.body);
 
   b.addBooking({ Reference: "EC-10009", Email: "old@example.com" }, "2026-10-12T12:00:00Z"); // older booking, no manage token
   c.sendDayBeforeEmail(b.row("EC-10009"), b.date("2026-10-12T12:00:00Z"));

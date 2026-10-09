@@ -1454,7 +1454,8 @@ function sendReminderEmail(v, start) {
     "Total: " + v.Total + " (" + v["Payment method"] + ")\n" +
     "Where: " + v.Address + "\n\n" +
     "Reference: " + v.Reference + "\n\n" +
-    changeText_(manageLink_(v[MANAGE_TOKEN_COLUMN]), waLink, "Need to change anything? Just reply to this email or WhatsApp us: ") + "\n\n" +
+    // No Change or cancel button on the day itself: just reply or WhatsApp.
+    "Need to change anything? Just reply to this email or WhatsApp us: " + waLink + "\n\n" +
     "See you soon,\nEasyClean Somerset";
 
   sendCustomerEmail_(v.Email, "Reminder: we're cleaning for you today", textBody, {
@@ -1467,7 +1468,7 @@ function sendReminderEmail(v, start) {
       address: v.Address,
       reference: v.Reference,
       waLink: waLink,
-      manageUrl: manageLink_(v[MANAGE_TOKEN_COLUMN])
+      manageUrl: ""
     }),
     name: "EasyClean Somerset"
   });
@@ -3741,7 +3742,7 @@ function adminUpdateJob(token, form) {
 
     var emailed = false, emailError = "";
     if (form.emailCustomer && d.email) {
-      try { sendBookingUpdateEmail_(d, ref, built.start); emailed = true; }
+      try { sendBookingUpdateEmail_(d, ref, built.start, v[MANAGE_TOKEN_COLUMN]); emailed = true; }
       catch (err) { emailError = String(err); console.error("Booking update email failed for " + ref + ": " + err); }
     }
     return { ok: true, reference: ref, changes: changes, emailed: emailError ? false : emailed, emailError: emailError };
@@ -3750,18 +3751,32 @@ function adminUpdateJob(token, form) {
   }
 }
 
-function sendBookingUpdateEmail_(d, reference, start) {
+// manageToken: the booking's own change-or-cancel link, so this email has
+// the Change or cancel button like the confirmation and day-before emails.
+function sendBookingUpdateEmail_(d, reference, start, manageToken) {
   var isAgent = d.channel === "Agent/Landlord";
   var name = d.name;
-  var body = "Here are the updated details for your booking (ref " + reference + "). When: " + fmtWhen(start) +
+  var manageUrl = manageLink_(manageToken);
+  var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" +
+    encodeURIComponent("Hi EasyClean Somerset, about my booking. Ref: " + reference);
+  var details = "Here are the updated details for your booking (ref " + reference + "). When: " + fmtWhen(start) +
     ". What: " + d.items + ". Total: " + d.total + " (" + d.payment + "). Where: " + d.address + "." +
-    (isAgent ? " Access: " + accessEmailText(d) + "." : "") +
-    " If anything looks wrong, just reply to this email or message us on WhatsApp.";
-  sendCustomerEmail_(d.email, "Booking updated: " + fmtWhen(start) + " (" + reference + ")",
-    "Hi " + name + ",\n\n" + body + "\n\nThanks,\nEasyClean Somerset", {
-      htmlBody: buildSimpleEmailHtml({ name: name, heading: "Your booking has been updated", body: body }),
-      name: "EasyClean Somerset"
-    });
+    (isAgent ? " Access: " + accessEmailText(d) + "." : "");
+  var help = "If anything looks wrong, or you need to change or cancel, " +
+    (manageUrl ? "use the button below, reply to this email, or" : "reply to this email, or");
+  var text = "Hi " + name + ",\n\n" + details + "\n\n" +
+    (manageUrl ? "If anything looks wrong, or you need to change or cancel, do it online: " + manageUrl + "\nOr reply to this email, or WhatsApp us: " + waLink
+               : "If anything looks wrong, just reply to this email or WhatsApp us: " + waLink) +
+    "\n\nThanks,\nEasyClean Somerset";
+  sendCustomerEmail_(d.email, "Booking updated: " + fmtWhen(start) + " (" + reference + ")", text, {
+    htmlBody: buildSimpleEmailHtml({
+      name: name,
+      heading: "Your booking has been updated",
+      paragraphs: [{ text: details }, { text: help, link: { label: "message us on WhatsApp", url: waLink } }],
+      button: manageUrl ? { text: "Change or cancel", url: manageUrl } : null
+    }),
+    name: "EasyClean Somerset"
+  });
 }
 
 // ============================================================

@@ -41,7 +41,7 @@ Check these before changing either side.
   - **Where prices change:** in `_data/prices.yml`.
 - **Service area:** Code.gs reads `service-area.js` and expects the `window.EC_SERVICE_AREA = [ "BA1", ... ];` format.
 - **Sign-off page:** `job-complete.html` uses `GET ?action=job&t=<token>` and `POST { action: "complete", ... }`.
-- **Change or cancel page (FRE-211):** `my-booking.html?t=<manage token>` is linked from the Change or cancel button in the confirmation, day-before, morning-of and "booking moved" emails. The manage token is its own column (`Manage token`), separate from the job token, so it can't sign off a job.
+- **Change or cancel page (FRE-211):** `my-booking.html?t=<manage token>` is linked from the Change or cancel button in the confirmation, day-before, "booking updated" (an admin app edit) and "booking moved" emails. The morning-of reminder and everything after the job (thank-you, follow-up, invoices, payment emails) don't have it; the morning-of reminder just says reply or WhatsApp. The manage token is its own column (`Manage token`), separate from the job token, so it can't sign off a job.
   - `GET ?action=booking&t=` returns `{ ok, reference, channel: "homeowner"|"agent", date, time, whenLabel, addressShort, items: [{ name, qty }], total, estMins, canChange, notChangeableReason, movesLeft, cancelDeadline, earlyStartGiven }`. Nothing private: no email, phone, full address or notes.
   - `GET ?action=rescheduleSlots&t=` returns the same shape as `?action=slots`, for this job's length, with its own time not counted as busy.
   - `POST { action: "cancel", t, reason }` and `POST { action: "reschedule", t, date: "yyyy-MM-dd", time: "HH:mm", earlyStart }` return `{ ok }` or an error: `not_found`, `cancelled`, `completed`, `started`, `slot_taken`, `needs_early_start`, `no_moves_left`, `busy`, `server_error`.
@@ -91,6 +91,10 @@ All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any o
 - These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
 
 ## Last updated
+
+9 October 2026 (afternoon):
+
+- The Change or cancel button is now in the "booking updated" email too, and no longer in the morning-of reminder. `Code.gs` only.
 
 9 October 2026 (later):
 
