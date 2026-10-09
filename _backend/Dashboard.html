@@ -173,6 +173,7 @@
          /^Agent arranging/.test(j.access || "") ? '<span class="pill due">Agent arranging access</span>'
           : '<span class="sub" style="margin:0;">' + esc(j.channel === "Agent/Landlord" ? "Agent" : "Homeowner") + '</span>') +
         (j.calendarMissing ? '<span class="pill late">Not in calendar</span>' : '') +
+        (j.repeat ? '<span class="pill done">Booked before</span>' : '') +
       '</div>' +
     '</button>';
   }
@@ -641,7 +642,9 @@
       '<div class="card">' +
         detail("When", j.when) + detail("Address", j.address) + detail("Site contact", j.contact) + detail("Access", j.access) +
         detail("What", j.items) + detail("Total", (j.bookingTotal || j.total) + " · " + j.payment) + detail("Notes", j.notes) + detail("Reference", j.reference) +
-      '</div>';
+      '</div>' +
+      (j.siteContactWa ? '<a class="btn btn-ghost" style="margin-bottom:10px;" target="_blank" rel="noopener" href="' + esc(j.siteContactWa) + '">WhatsApp the site contact</a>' : '') +
+      historyCard(j) + marketingCard(j);
     if (j.cancelled) {
       app(head + '<div class="card">' +
         '<p style="margin:0 0 8px;"><span class="pill cancelled">Cancelled ' + esc(j.cancelledAt) + '</span></p>' +
@@ -694,6 +697,46 @@
     initCancel(j);
     renderTimer(j);
     initPhotos(j);
+  }
+
+  // ---------- Booked before (FRE-203) ----------
+  // Other bookings with the same email or phone, newest first.
+  function historyCard(j) {
+    if (!j.history || !j.history.length) return "";
+    var more = j.historyCount > j.history.length ? '<p class="note" style="margin:6px 0 0;">And ' + (j.historyCount - j.history.length) + ' more. Search their name to see them all.</p>' : '';
+    return '<div class="card"><div class="pad-label">Booked before (' + j.historyCount + ')</div>' +
+      j.history.map(function (h) {
+        var label = esc(h.reference) + ' &middot; ' + esc(h.when) + ' &middot; ' + esc(h.total) + ' &middot; ' + esc(h.status);
+        return h.token
+          ? '<div style="margin:4px 0;"><button class="btn-link" onclick="openJob(\'' + esc(h.token) + '\')">' + label + '</button></div>'
+          : '<div style="margin:4px 0;">' + label + '</div>';
+      }).join("") + more + '</div>';
+  }
+
+  // ---------- Marketing opt-in (FRE-203) ----------
+  // What they agreed to, and a button for when they reply STOP.
+  function marketingCard(j) {
+    var m = j.marketing;
+    if (!m || (!m.optedIn && !m.unsubscribedOn)) return "";
+    var status = m.optedIn
+      ? '<p class="note" style="margin:0 0 8px;">' + esc(m.consent) + '</p>' +
+        '<button class="btn-link" id="btn-unsub" onclick="setUnsub(\'' + esc(j.token) + '\', true)">They asked to stop: unsubscribe them</button>'
+      : '<p class="note" style="margin:0 0 8px;">Unsubscribed ' + esc(m.unsubscribedOn) + '. They won&#8217;t be on the marketing list.</p>' +
+        '<button class="btn-link" id="btn-unsub" onclick="setUnsub(\'' + esc(j.token) + '\', false)">Undo (only if this was a mistake)</button>';
+    return '<div class="card"><div class="pad-label">Marketing emails</div>' + status + '<p class="note" id="unsub-msg"></p></div>';
+  }
+
+  function setUnsub(token, on) {
+    var b = $("btn-unsub"), msg = $("unsub-msg");
+    if (b) b.disabled = true;
+    call("adminSetUnsubscribed", token, !!on).then(function (r) {
+      if (!r.ok) { if (b) b.disabled = false; msg.className = "note bad"; msg.textContent = r.error; return; }
+      state.flash = on ? "Unsubscribed from marketing emails." : "Unsubscribe undone.";
+      openJob(token);
+    }).catch(function (err) {
+      if (b) b.disabled = false;
+      msg.className = "note bad"; msg.textContent = "Something went wrong: " + (err && err.message || err);
+    });
   }
 
   // ---------- Calendar event deleted by hand (FRE-203) ----------

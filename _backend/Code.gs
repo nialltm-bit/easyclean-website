@@ -458,7 +458,7 @@ function appendCustomerRow(data, reference, slotLabel, jobToken) {
   var sheet = getCustomerSheet();
   if (!sheet) return; // setUpCustomerSheet() hasn't been run yet
   var headerRow = ensureColumns(sheet, ["Job token", "Access", "Booked via", "Notes", EARLY_START_COLUMN, "Est. mins", MANAGE_TOKEN_COLUMN,
-    "Starts at", "Ends at", REQUEST_ID_COLUMN]);
+    "Starts at", "Ends at", REQUEST_ID_COLUMN, MARKETING_CONSENT_COLUMN]);
   var byHeader = {
     "Timestamp": new Date(),
     "Reference": reference,
@@ -471,6 +471,8 @@ function appendCustomerRow(data, reference, slotLabel, jobToken) {
     "Payment method": data.payment,
     "Booking time": slotLabel,
     "Marketing opt-in": data.marketingOptIn ? "Yes" : "No",
+    // The exact words they ticked, and when (FRE-203).
+    "Marketing consent": marketingConsentRecord_(data, new Date()),
     "Referral / offer code": data.referralCode || "",
     "Channel": data.channel || "Consumer",
     "Business name": data.businessName || "",
@@ -716,7 +718,7 @@ function validateBookingInput(data) {
   // Phone: free text is fine ("07700 900000, evenings"), as long as there's a number in it.
   if (data.phone.length > 40 || data.phone.replace(/\D/g, "").length < 7) return "bad_details";
   if (!data.address || data.address.length > 300) return "bad_details";
-  var limits = { postcode: 12, businessName: 120, siteContactName: 100, siteContactPhone: 40, agencyId: 60, referralCode: 40, slotLabel: 80, parking: 60, notes: 400 };
+  var limits = { postcode: 12, businessName: 120, siteContactName: 100, siteContactPhone: 40, agencyId: 60, referralCode: 40, slotLabel: 80, parking: 60, notes: 400, marketingConsentText: 300 };
   for (var k in limits) {
     if (data[k] !== undefined && data[k] !== null && String(data[k]).length > limits[k]) return "bad_details";
   }
@@ -1036,6 +1038,12 @@ function createBookingLocked_(data) {
       "so it won't appear in the admin app. Add the row by hand from the calendar event.");
   }
 
+  try {
+    data.history = bookingHistoryFor_(data.email, data.phone, reference);
+  } catch (historyErr) {
+    noteProblem_("Looking up earlier bookings failed for " + reference, historyErr);
+  }
+
   if (data.channel === "Agent/Landlord") {
     try {
       data.agencyCheck = findOrAddAgency_(data.businessName);
@@ -1352,7 +1360,10 @@ function sendDayOfReminders() {
   // the 1st), and last of all the health check, so it can report anything
   // that failed this morning. Each part is separate so one failing never
   // stops the others.
+  // First, pick up any job dragged to a new time in Google Calendar.
+  try { syncOpenBookingTimes_(); } catch (err) { noteProblem_("Updating booking times from the calendar failed", err); }
   try { sendDayBeforeReminders(); } catch (err) { noteProblem_("Day-before reminders failed", err); }
+  try { sendSiteContactDigest_(); } catch (err) { noteProblem_("Tomorrow's site contact email failed", err); }
   try {
     if (Utilities.formatDate(new Date(), TIMEZONE, "u") === "1") sendUnpaidDigest();
   } catch (err) { noteProblem_("Unpaid invoices email failed", err); }
@@ -2850,6 +2861,7 @@ function adminGetOverview() {
   var events = bookingEventsByRef_(new Date(earliest), new Date(now.getTime() + 400 * 86400000));
 
   var todayKey = dayKey(now);
+  var repeats = repeatReferences_(header, data);
   var today = [], waiting = [], upcoming = [], unpaid = [], recentlyPaid = [];
   for (i = 1; i < data.length; i++) {
     v = rowToObject(header, data[i]);
@@ -2859,6 +2871,7 @@ function adminGetOverview() {
     if (ev) syncBookingTimes_(sheet, i + 1, v, ev);
     var start = ev ? ev.getStartTime() : (open ? sheetStart_(v) : null);
     var job = adminJobSummary(v, start);
+    if (repeats[v.Reference]) job.repeat = true;
     if (open) {
       if (!ev) job.calendarMissing = true;
       if (!start) {
@@ -2900,6 +2913,19 @@ function adminGetJob(token) {
   var start = t.start;
   var job = adminJobSummary(row.values, start);
   job.ok = true;
+  try {
+    var h = bookingHistoryFor_(row.values.Email, row.values.Phone, row.values.Reference, 10);
+    job.historyCount = h.count;
+    job.history = h.items;
+  } catch (err) {
+    job.historyCount = 0; job.history = [];
+  }
+  job.siteContactWa = siteContactWaLink_(row.values, start);
+  try {
+    job.marketing = row.values.Email ? marketingStatusFor_(row.values.Email) : null;
+  } catch (err) {
+    job.marketing = null;
+  }
   job.hasCalendarEvent = !!t.ev;
   job.hasSavedTime = !!sheetStart_(row.values);
   job.lateNotice = !!start && isLateCancellation(start, new Date());
@@ -3394,17 +3420,31 @@ function bookingEventsByRef_(from, to) {
 
 // Copies the event's time into the sheet when they differ (a new booking
 // from before this version, or one dragged to a new time in the calendar).
+// A drag also updates the "Booking time" text, notes the move in Changes,
+// and, if it moved to another day, lets its reminders go again. Returns
+// true if anything was written.
 function syncBookingTimes_(sheet, rowIndex, v, ev) {
   var start = ev.getStartTime(), end = ev.getEndTime();
   var savedStart = sheetStart_(v), savedEnd = sheetEnd_(v);
-  if (savedStart && savedEnd && savedStart.getTime() === start.getTime() && savedEnd.getTime() === end.getTime()) return;
+  if (savedStart && savedEnd && savedStart.getTime() === start.getTime() && savedEnd.getTime() === end.getTime()) return false;
   try {
-    var header = ensureColumns(sheet, START_COLUMNS);
-    setRowValues_(sheet, rowIndex, header, { "Starts at": start, "Ends at": end });
-    v["Starts at"] = start;
-    v["Ends at"] = end;
+    var header = ensureColumns(sheet, START_COLUMNS.concat(["Changes"]));
+    var writes = { "Starts at": start, "Ends at": end, "Booking time": fmtWhen(start) };
+    if (savedStart && savedStart.getTime() !== start.getTime()) {
+      var log = String(v.Changes || "");
+      writes.Changes = (log ? log + "; " : "") + Utilities.formatDate(new Date(), TIMEZONE, "d MMM") +
+        ": moved in the calendar from " + fmtWhen(savedStart) + " to " + fmtWhen(start);
+      if (dayKey(savedStart) !== dayKey(start)) {
+        if (header.indexOf("Day-before reminder sent") !== -1) writes["Day-before reminder sent"] = "";
+        if (header.indexOf("Day-of reminder sent") !== -1) writes["Day-of reminder sent"] = "";
+      }
+    }
+    setRowValues_(sheet, rowIndex, header, writes);
+    Object.keys(writes).forEach(function (k) { v[k] = writes[k]; });
+    return true;
   } catch (err) {
     noteProblem_("Saving the booking time in the sheet failed for " + v.Reference, err);
+    return false;
   }
 }
 
@@ -3512,6 +3552,308 @@ function openBookingIssues_(now) {
     if (start && now.getTime() - start.getTime() > SIGNOFF_NUDGE_DAYS * 86400000) out.unsigned.push(label);
   });
   return out;
+}
+
+// Brings every open booking's saved time up to date from the calendar
+// (jobs dragged to a new time in Google Calendar). Runs at the start of the
+// daily trigger, before the reminders, and whenever the admin app opens.
+function syncOpenBookingTimes_() {
+  var sheet = getCustomerSheet();
+  if (!sheet) return 0;
+  var data = sheet.getDataRange().getValues();
+  var header = data[0];
+  var now = new Date();
+  var earliest = now.getTime() - 60 * 86400000;
+  var open = [];
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (!v.Reference || v["Completed at"] || v["Cancelled at"]) continue;
+    open.push({ rowIndex: i + 1, v: v });
+    var saved = sheetStart_(v);
+    if (saved && saved.getTime() - 86400000 < earliest) earliest = saved.getTime() - 86400000;
+  }
+  if (!open.length) return 0;
+  var events = bookingEventsByRef_(new Date(earliest), new Date(now.getTime() + 400 * 86400000));
+  var changed = 0;
+  open.forEach(function (o) {
+    var ev = events[o.v.Reference];
+    if (ev && syncBookingTimes_(sheet, o.rowIndex, o.v, ev)) changed++;
+  });
+  return changed;
+}
+
+// ---- Repeat customers (FRE-203) ----
+// A booking is matched to earlier ones by email, or by phone number.
+
+function emailKey_(x) {
+  var e = String(x || "").trim().toLowerCase();
+  return /@/.test(e) ? e : "";
+}
+
+// "07700 900 000", "+44 7700 900000" and 447700900000 are the same phone.
+function phoneKey_(x) {
+  var d = phoneText(x).replace(/\D/g, "");
+  if (d.indexOf("0044") === 0) d = "0" + d.slice(4);
+  else if (d.indexOf("44") === 0 && d.length === 12) d = "0" + d.slice(2);
+  else if (d.length === 10 && d.charAt(0) !== "0") d = "0" + d;
+  return d.length >= 10 ? d : "";
+}
+
+// The day a booking is for (or was done), for listing past jobs.
+function historyDate_(v) {
+  return validDate_(v["Started at"]) || sheetStart_(v) || validDate_(v["Completed at"]) || validDate_(v.Timestamp);
+}
+
+// Other bookings by the same customer, newest first: { count, done,
+// cancelled, open, items: [{ reference, token, when, total, status }] }
+// (items capped at `limit`, default 5).
+function bookingHistoryFor_(email, phone, excludeRef, limit) {
+  var out = { count: 0, done: 0, cancelled: 0, open: 0, items: [] };
+  var ek = emailKey_(email), pk = phoneKey_(phone);
+  if (!ek && !pk) return out;
+  var sheet = getCustomerSheet();
+  if (!sheet) return out;
+  var data = sheet.getDataRange().getValues();
+  var header = data[0];
+  var matches = [];
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (!v.Reference || v.Reference === excludeRef) continue;
+    if ((ek && emailKey_(v.Email) === ek) || (pk && phoneKey_(v.Phone) === pk)) matches.push(v);
+  }
+  matches.sort(function (a, b) {
+    var x = historyDate_(a), y = historyDate_(b);
+    return (y ? y.getTime() : 0) - (x ? x.getTime() : 0);
+  });
+  matches.forEach(function (v) {
+    var status = v["Cancelled at"] ? "Cancelled" : (v["Completed at"] ? "Done" : "Booked");
+    out.count++;
+    if (status === "Done") out.done++; else if (status === "Cancelled") out.cancelled++; else out.open++;
+  });
+  out.items = matches.slice(0, limit || 5).map(function (v) {
+    var d = historyDate_(v);
+    return {
+      reference: String(v.Reference),
+      token: String(v["Job token"] || ""),
+      when: d ? fmtDay(d) : bookingTimeText(v),
+      total: String(v.Total || ""),
+      status: v["Cancelled at"] ? "Cancelled" : (v["Completed at"] ? "Done" : "Booked")
+    };
+  });
+  return out;
+}
+
+// The line in your new-booking email, or "" for a first booking.
+function historyAlertText_(h) {
+  if (!h || !h.count) return "";
+  var parts = [];
+  if (h.done) parts.push(h.done + " done");
+  if (h.open) parts.push(h.open + " still booked");
+  if (h.cancelled) parts.push(h.cancelled + " cancelled");
+  var last = h.items[0];
+  return "Booked before: " + h.count + (h.count === 1 ? " other booking" : " other bookings") + " (" + parts.join(", ") + "). " +
+    "Latest: " + last.reference + ", " + last.when + ", " + last.total + " (" + last.status.toLowerCase() + ").";
+}
+
+// References of bookings whose customer had booked before (an earlier row
+// with the same email or phone). One pass over the sheet, in booking order.
+function repeatReferences_(header, data) {
+  var seen = {}, out = {};
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    if (!v.Reference) continue;
+    var keys = [emailKey_(v.Email), phoneKey_(v.Phone)].filter(String);
+    if (keys.some(function (k) { return seen[k]; })) out[v.Reference] = true;
+    keys.forEach(function (k) { seen[k] = true; });
+  }
+  return out;
+}
+
+// ---- Site contact reminder (FRE-195) ----
+// Agent jobs name a tenant or site contact who never gets our emails. The
+// day before, you get one email listing tomorrow's agent jobs, each with a
+// WhatsApp link that opens a ready-written message to that contact. It's a
+// link you tap and send yourself, so there's no paid messaging service. The
+// same link is on the job page in the admin app.
+var SITE_CONTACT_DIGEST_KEY = "SITE_CONTACT_DIGEST_DAY"; // the day last emailed about, "yyyy-MM-dd"
+
+function siteContactMessage_(v, start) {
+  var first = String(v["Site contact name"] || "").trim().split(/\s+/)[0] || "there";
+  var who = String(v["Business name"] || "").trim() || "Your letting agent";
+  var when = start ? Utilities.formatDate(start, TIMEZONE, "EEEE d MMMM") + " at " + clockText_(start) : bookingTimeText(v);
+  return "Hi " + first + ", it's Niall from EasyClean Somerset. " + who + " has booked us to clean at " + shortAddress_(v.Address) +
+    " on " + when + ". Could you make sure we can get in? Let me know if there's anything we should know about parking or access. Thanks.";
+}
+
+// The wa.me link for an open agent job's site contact, or "" if there's no
+// one to message (agent arranging access, no phone, or it's the booker's
+// own number, who already gets our emails).
+function siteContactWaLink_(v, start) {
+  if (v.Channel !== "Agent/Landlord" || v["Cancelled at"] || v["Completed at"]) return "";
+  var phone = v["Site contact phone"];
+  if (!phone || (phoneKey_(phone) && phoneKey_(phone) === phoneKey_(v.Phone))) return "";
+  var number = toWhatsAppNumber(phone);
+  if (!number) return "";
+  return "https://wa.me/" + number + "?text=" + encodeURIComponent(siteContactMessage_(v, start));
+}
+
+// Emails you tomorrow's agent jobs that have a site contact. Once per day.
+function sendSiteContactDigest_(now) {
+  now = now || new Date();
+  var tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  var dayKeyStr = dayKey(tomorrow);
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty(SITE_CONTACT_DIGEST_KEY) === dayKeyStr) return 0;
+  var lines = [];
+  getBookingReferencesForDay(tomorrow).forEach(function (item) {
+    var row = findBookingRow(item.ref);
+    if (!row) return;
+    var v = row.values;
+    var link = siteContactWaLink_(v, item.start);
+    if (!link) return;
+    lines.push({
+      start: item.start ? item.start.getTime() : 0,
+      text: (item.start ? clockText_(item.start) : bookingTimeText(v)) + ", " + v.Reference + ", " + v.Address +
+        " (" + (v["Business name"] || v.Name) + ")\n" +
+        "Site contact: " + v["Site contact name"] + ", " + phoneText(v["Site contact phone"]) + "\n" +
+        "WhatsApp them: " + link
+    });
+  });
+  if (!lines.length) return 0;
+  lines.sort(function (a, b) { return a.start - b.start; });
+  var n = lines.length;
+  var sent = notifyOwner("Tomorrow's agent " + (n === 1 ? "job" : "jobs") + ": message the site " + (n === 1 ? "contact" : "contacts"),
+    "Tap a link to send the site contact a ready-written WhatsApp about tomorrow's clean. Check it before you send.\n\n" +
+    lines.map(function (l) { return l.text; }).join("\n\n"));
+  if (sent) props.setProperty(SITE_CONTACT_DIGEST_KEY, dayKeyStr);
+  return sent ? n : 0;
+}
+
+// ---- Marketing opt-ins (FRE-203) ----
+// Each opt-in keeps the exact words the customer ticked and when, in the
+// "Marketing consent" column. "Unsubscribed on" is set on every booking
+// with that email when they ask to stop (the admin app's job page, for
+// now: marketing emails must say "reply STOP to unsubscribe"). Ticking the
+// box again on a later booking is fresh consent. The only list to send
+// marketing to is the "Marketing list" tab, rebuilt by refreshMarketingList.
+//
+// If you change a tick box's wording on the website, change it here too.
+// The morning check compares the two and tells you if they differ.
+var MARKETING_CONSENT_TEXT = {
+  "Consumer": "Keep me posted about seasonal offers and cleaning reminders",
+  "Agent/Landlord": "Keep me posted about availability and landlord/agent offers"
+};
+var MARKETING_CONSENT_COLUMN = "Marketing consent";
+var UNSUBSCRIBED_COLUMN = "Unsubscribed on";
+var MARKETING_LIST_SHEET_NAME = "Marketing list";
+
+// What goes in "Marketing consent" for a new booking: the box's wording
+// (as the page sent it, or as written above) and the date ticked.
+function marketingConsentRecord_(data, when) {
+  if (!data.marketingOptIn) return "";
+  var words = typeof data.marketingConsentText === "string" && data.marketingConsentText.trim()
+    ? data.marketingConsentText.replace(/\s+/g, " ").trim().slice(0, 300)
+    : MARKETING_CONSENT_TEXT[data.channel === "Agent/Landlord" ? "Agent/Landlord" : "Consumer"];
+  return "Ticked \"" + words + "\" when booking online, " + Utilities.formatDate(when || new Date(), TIMEZONE, "d MMMM yyyy");
+}
+
+// Admin app: mark everyone with this booking's email as unsubscribed (when
+// they reply STOP), or undo it.
+function adminSetUnsubscribed(token, unsubscribe) {
+  requireOwner();
+  var row = findBookingByToken(token);
+  if (!row) return { ok: false, error: "not_found" };
+  var ek = emailKey_(row.values.Email);
+  if (!ek) return { ok: false, error: "This booking has no email address." };
+  var sheet = getCustomerSheet();
+  var header = ensureColumns(sheet, [UNSUBSCRIBED_COLUMN]);
+  var data = sheet.getDataRange().getValues();
+  var col = header.indexOf(UNSUBSCRIBED_COLUMN), emailCol = header.indexOf("Email");
+  var when = new Date(), changed = 0;
+  for (var i = 1; i < data.length; i++) {
+    if (emailKey_(data[i][emailCol]) !== ek) continue;
+    sheet.getRange(i + 1, col + 1).setValue(unsubscribe ? when : "");
+    changed++;
+  }
+  return { ok: true, unsubscribed: !!unsubscribe, rows: changed, on: unsubscribe ? fmtDay(when) : "" };
+}
+
+// The marketing status for one booking's email, for the job page.
+function marketingStatusFor_(email) {
+  var out = { optedIn: false, consent: "", unsubscribedOn: "" };
+  var ek = emailKey_(email);
+  var sheet = ek ? getCustomerSheet() : null;
+  if (!sheet) return out;
+  var people = marketingPeople_(sheet);
+  var p = people[ek];
+  if (!p) return out;
+  out.optedIn = p.subscribed;
+  out.consent = p.consent;
+  out.unsubscribedOn = p.unsubscribed ? fmtDay(p.unsubscribed) : "";
+  return out;
+}
+
+// Everyone by email: their latest opt-in and whether an unsubscribe came
+// after it. { email: { name, channel, consent, consentAt, lastBooked, unsubscribed, subscribed } }
+function marketingPeople_(sheet) {
+  var data = sheet.getDataRange().getValues();
+  var header = data[0];
+  var people = {};
+  for (var i = 1; i < data.length; i++) {
+    var v = rowToObject(header, data[i]);
+    var ek = emailKey_(v.Email);
+    if (!v.Reference || !ek) continue;
+    var p = people[ek] || (people[ek] = { email: ek, name: "", channel: "", consent: "", consentAt: null, lastBooked: null, unsubscribed: null });
+    var booked = validDate_(v.Timestamp);
+    if (booked && (!p.lastBooked || booked > p.lastBooked)) { p.lastBooked = booked; p.name = String(v.Name || ""); p.channel = String(v.Channel || "Consumer"); }
+    if (String(v["Marketing opt-in"]) === "Yes" && booked && (!p.consentAt || booked > p.consentAt)) {
+      p.consentAt = booked;
+      p.consent = String(v[MARKETING_CONSENT_COLUMN] || "") || "Ticked the box when booking (wording not recorded, booked before 9 Oct 2026)";
+    }
+    var u = validDate_(v[UNSUBSCRIBED_COLUMN]);
+    if (u && (!p.unsubscribed || u > p.unsubscribed)) p.unsubscribed = u;
+  }
+  Object.keys(people).forEach(function (k) {
+    var p = people[k];
+    p.subscribed = !!p.consentAt && (!p.unsubscribed || p.consentAt > p.unsubscribed);
+  });
+  return people;
+}
+
+/**
+ * Run from the function dropdown before sending any marketing. Rebuilds the
+ * "Marketing list" tab: one row per email that ticked the box and hasn't
+ * unsubscribed since, with the words they agreed to. Send only to this list.
+ */
+function refreshMarketingList() {
+  var sheet = getCustomerSheet();
+  if (!sheet) { Logger.log("Customer sheet not set up."); return 0; }
+  var people = marketingPeople_(sheet);
+  var rows = Object.keys(people).map(function (k) { return people[k]; })
+    .filter(function (p) { return p.subscribed; })
+    .sort(function (a, b) { return (b.lastBooked ? b.lastBooked.getTime() : 0) - (a.lastBooked ? a.lastBooked.getTime() : 0); });
+  var ss = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty(CUSTOMER_SHEET_PROPERTY_KEY));
+  var tab = ss.getSheetByName(MARKETING_LIST_SHEET_NAME) || ss.insertSheet(MARKETING_LIST_SHEET_NAME);
+  var header = ["Email", "Name", "Channel", "Last booked", "Consent", "Consent given"];
+  var values = [header].concat(rows.map(function (p) {
+    return [p.email, p.name, p.channel, p.lastBooked || "", p.consent, p.consentAt || ""];
+  }));
+  tab.clear();
+  tab.getRange(1, 1, values.length, header.length).setValues(values);
+  tab.getRange(1, 1, 1, header.length).setFontWeight("bold");
+  tab.setFrozenRows(1);
+  Logger.log(rows.length + " people on the marketing list. Every marketing email must say how to unsubscribe (reply STOP).");
+  return rows.length;
+}
+
+// For the morning check: the tick box's words on a live page, or null.
+function liveConsentLabel_(page) {
+  // A site that can't be read is already reported by the price check.
+  var res;
+  try { res = UrlFetchApp.fetch(SITE_URL + "/" + page, { muteHttpExceptions: true, followRedirects: true }); } catch (err) { return null; }
+  if (res.getResponseCode() !== 200) return null;
+  var m = /id="bf-marketing"[^>]*>\s*([^<]+?)\s*<\/label>/.exec(res.getContentText());
+  return m ? m[1].replace(/&amp;/g, "&").replace(/&#8217;|&rsquo;/g, "’").replace(/\s+/g, " ").trim() : null;
 }
 
 // ---- One-time booking IDs (FRE-203, FRE-6) ----
@@ -5301,6 +5643,14 @@ function dailyHealthCheck_(opts) {
       (list.length === 1 ? "isn't" : "aren't") + " signed off yet, so " + (list.length === 1 ? "it hasn't" : "they haven't") + " been invoiced: " + list.join(", ") + ". " +
       "They're under Waiting for sign-off in the admin app.";
   });
+  ["Consumer", "Agent/Landlord"].forEach(function (ch) {
+    check("Couldn't read the marketing tick box on " + priceListPage(ch), function () {
+      var live = liveConsentLabel_(priceListPage(ch));
+      if (live === null) return "";
+      return live === MARKETING_CONSENT_TEXT[ch] ? "" :
+        "The marketing tick box on " + priceListPage(ch) + " now says \"" + live + "\". Update MARKETING_CONSENT_TEXT in Code.gs to match, so each opt-in records what people agreed to.";
+    });
+  });
   check("Couldn't check the bank holiday list", function () {
     var latest = getBankHolidays().slice().sort().pop();
     if (!latest) return "";
@@ -5378,6 +5728,8 @@ function sendNewBookingAlert(data, reference, jobToken, start, priced) {
     "Phone: " + data.phone,
     "Email: " + data.email
   ];
+  var historyNote = historyAlertText_(data.history);
+  if (historyNote) lines.push(historyNote);
   if (isAgent) lines.push("Access: " + accessEmailText(data));
   var agencyNote = isAgent ? agencyAlertText_(data.businessName, data.agencyCheck) : "";
   if (data.referralCode) lines.push("Referral/offer code: " + data.referralCode);

@@ -227,11 +227,48 @@ async function tabs(browser) {
   await context.close();
 }
 
+async function customerCards(browser) {
+  console.log("\n== Admin app: booked before, site contact and marketing (FRE-203, FRE-195)");
+  const b = loadBackend({ live: true });
+  b.setUpSheet();
+  const soon = (h) => new Date(Date.now() + h * 3600000).toISOString();
+  b.addBooking({ Reference: "EC-30001", Email: "sam@example.com", "Completed at": b.date("2026-09-10T12:00:00Z"), "Starts at": b.date("2026-09-10T08:00:00Z"), Total: "£90" });
+  const v = b.addBooking({ Reference: "EC-30002", Email: "sam@example.com", "Marketing opt-in": "Yes",
+    "Marketing consent": "Ticked \"Keep me posted about seasonal offers and cleaning reminders\" when booking online, 8 October 2026" }, soon(2));
+  const a = b.addBooking({ Reference: "EC-30003", Name: "Pat Agent", Email: "pat@acme.example", Phone: "07000 000009", "Business name": "Acme Lettings", Channel: "Agent/Landlord",
+    "Payment method": "Invoice, 14 days", "Site contact name": "Sam Tenant", "Site contact phone": "07000 000002" }, soon(26));
+
+  let { page, context, errors } = await openAdmin(browser, b, "home");
+  await page.waitForSelector(".card.job");
+  const cardText = (await page.innerText("#app")).replace(/\s+/g, " ");
+  check("the repeat booking's card says Booked before", /EC-30002[^]*?Booked before/i.test(cardText), cardText.slice(0, 400));
+  await page.evaluate((t) => window.openJob(t), v["Job token"]);
+  await page.waitForSelector("text=Booked before (1)");
+  const jobText = (await page.innerText("#app")).replace(/\s+/g, " ");
+  check("the job page lists the earlier booking", /Booked before \(1\) EC-30001 · Thu 10 Sep 2026 · £90 · Done/i.test(jobText), jobText.slice(0, 600));
+  check("and shows what they agreed to for marketing", /Marketing emails Ticked "Keep me posted about seasonal offers and cleaning reminders"/i.test(jobText));
+  await page.click("text=EC-30001 · Thu 10 Sep 2026");
+  await page.waitForSelector("h1");
+  check("tapping an earlier booking opens it", /Signed off/i.test(await page.innerText("#app")));
+  await page.evaluate((t) => window.openJob(t), v["Job token"]);
+  await page.waitForSelector("#btn-unsub");
+  await page.click("#btn-unsub");
+  await page.waitForSelector("text=Unsubscribed from marketing emails.");
+  check("unsubscribing is saved and shown", b.row("EC-30002")["Unsubscribed on"] instanceof b.ctx.Date && /Unsubscribed Thu|Unsubscribed \w{3} \d/.test(await page.innerText("#app")));
+  await page.evaluate((t) => window.openJob(t), a["Job token"]);
+  await page.waitForSelector("text=WhatsApp the site contact");
+  const href = await page.getAttribute("text=WhatsApp the site contact", "href");
+  check("an agent job has a WhatsApp the site contact button", /^https:\/\/wa\.me\/447000000002\?text=Hi%20Sam%2C%20it's%20Niall/.test(href), href);
+  check("no page errors", errors.length === 0, errors);
+  await context.close();
+}
+
 (async () => {
   const browser = await chromium.launch();
   try {
     await jobPage(browser);
     await tabs(browser);
+    await customerCards(browser);
   } finally {
     await browser.close();
   }

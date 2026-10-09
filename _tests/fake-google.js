@@ -81,6 +81,7 @@ class FakeSheet {
   insertRowsAfter(after, n) { this.maxRows += n; }
   setFrozenRows(n) { this.frozen = n; }
   appendRow(values) { this.rows.push(values.slice()); this.maxRows = Math.max(this.maxRows, this.rows.length); }
+  clear() { this.rows = []; this.cellFormat = {}; return this; }
   getDataRange() { return this.getRange(1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.width())); }
   getRange(r, c, nr, nc) {
     const sheet = this;
