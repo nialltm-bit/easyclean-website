@@ -61,8 +61,9 @@
  *   8. Same again for the morning reminder: pick "setUpDailyReminders"
  *      from the same dropdown and click Run. See the comment above that
  *      function for details.
- *   9. REVIEW_URL below is already set to the real Trustpilot review page —
- *      nothing to do here unless that link ever changes.
+ *   9. REVIEW_URL below is the Google review link (from Google Business
+ *      Profile > Ask for reviews), and TRUSTPILOT_URL the Trustpilot page
+ *      offered as a second choice. Nothing to do unless either changes.
  *  10. Bank details for agent invoices: Project Settings -> Script
  *      Properties -> add BANK_ACCOUNT_NAME, BANK_SORT_CODE and
  *      BANK_ACCOUNT_NUMBER. Then pick "checkInvoiceSettings" from the
@@ -127,7 +128,10 @@ var SITE_URL = "https://easycleansomerset.co.uk";
 var BUSINESS_NAME = "Niall Maher";                 // real trading name, used on invoices — same one on terms.html
 var BUSINESS_ADDRESS = "33 Ivy Walk, Midsomer Norton, BA3 2EE";
 var REMINDER_HOUR = 7; // morning-of reminder emails go out in this hour, local time (TIMEZONE above)
-var REVIEW_URL = "https://uk.trustpilot.com/review/easycleansomerset.co.uk";
+// Thank-you and follow-up emails ask for a Google review first (it feeds the
+// map results), with Trustpilot as a second link (FRE-217).
+var REVIEW_URL = "https://g.page/r/CUP3ss-4Yk11EBM/review";
+var TRUSTPILOT_URL = "https://uk.trustpilot.com/review/easycleansomerset.co.uk";
 
 // Every booking is also written as a row into a Google Sheet, alongside the
 // calendar event createBooking() already creates. A calendar isn't built for
@@ -1360,7 +1364,9 @@ function sendDayOfReminders() {
   // the 1st), and last of all the health check, so it can report anything
   // that failed this morning. Each part is separate so one failing never
   // stops the others.
-  // First, pick up any job dragged to a new time in Google Calendar.
+  // Back up the customer sheet before anything below writes to it (FRE-220).
+  try { backupCustomerSheet_(); } catch (err) { noteProblem_("Backing up the customer sheet failed", err); }
+  // Then pick up any job dragged to a new time in Google Calendar.
   try { syncOpenBookingTimes_(); } catch (err) { noteProblem_("Updating booking times from the calendar failed", err); }
   try { sendDayBeforeReminders(); } catch (err) { noteProblem_("Day-before reminders failed", err); }
   try { sendSiteContactDigest_(); } catch (err) { noteProblem_("Tomorrow's site contact email failed", err); }
@@ -2135,6 +2141,66 @@ function getOrCreateFolder(name) {
   return DriveApp.createFolder(name);
 }
 
+// ---- Daily backup of the customer sheet (FRE-220) ----
+// Each morning, before anything else runs, the whole customer sheet (every
+// tab) is copied into a private Drive folder as "Customer sheet backup
+// YYYY-MM-DD". Copies older than BACKUP_KEEP_DAYS go to the Drive bin (which
+// keeps them another 30 days). Only files named exactly like a backup are
+// ever binned. The folder's ID is kept in Script Properties, not here.
+var BACKUP_FOLDER_NAME = "EasyClean Somerset backups";
+var BACKUP_FOLDER_KEY = "BACKUP_FOLDER_ID";
+var BACKUP_LAST_KEY = "BACKUP_LAST_AT";
+var BACKUP_PREFIX = "Customer sheet backup ";
+var BACKUP_KEEP_DAYS = 30;
+
+function backupFolder_() {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty(BACKUP_FOLDER_KEY);
+  if (id) {
+    try { return DriveApp.getFolderById(id); } catch (err) { /* folder deleted: make a new one */ }
+  }
+  var folder = getOrCreateFolder(BACKUP_FOLDER_NAME);
+  props.setProperty(BACKUP_FOLDER_KEY, folder.getId());
+  return folder;
+}
+
+function backupCustomerSheet_(now) {
+  now = now || new Date();
+  var props = PropertiesService.getScriptProperties();
+  var sheetId = props.getProperty(CUSTOMER_SHEET_PROPERTY_KEY);
+  if (!sheetId) return { made: false, removed: 0 }; // no sheet yet: the health check reports that
+  var folder = backupFolder_();
+  var today = Utilities.formatDate(now, TIMEZONE, "yyyy-MM-dd");
+  var oldest = Utilities.formatDate(new Date(now.getTime() - BACKUP_KEEP_DAYS * 86400000), TIMEZONE, "yyyy-MM-dd");
+  var pattern = new RegExp("^" + BACKUP_PREFIX + "(\\d{4}-\\d{2}-\\d{2})$");
+  var haveToday = false, removed = 0;
+  var files = folder.getFiles();
+  while (files.hasNext()) {
+    var f = files.next();
+    var m = pattern.exec(f.getName());
+    if (!m) continue;
+    if (m[1] === today) haveToday = true;
+    else if (m[1] < oldest) { f.setTrashed(true); removed++; }
+  }
+  var copy = null;
+  if (!haveToday) copy = DriveApp.getFileById(sheetId).makeCopy(BACKUP_PREFIX + today, folder);
+  props.setProperty(BACKUP_LAST_KEY, now.toISOString());
+  return { made: !!copy, removed: removed, url: copy ? copy.getUrl() : "", folderUrl: folder.getUrl() };
+}
+
+/**
+ * Optional: run this from the editor (pick "backupCustomerSheetNow" in the
+ * function dropdown and press Run) to make today's backup straight away
+ * instead of waiting for the morning. The log shows where it went.
+ */
+function backupCustomerSheetNow() {
+  requireOwner();
+  var r = backupCustomerSheet_();
+  Logger.log(r.made ? "Backed up: " + r.url : "Today's backup was already there.");
+  Logger.log("Backups folder: " + (r.folderUrl || "not made yet (no customer sheet)"));
+  return { ok: true, made: r.made };
+}
+
 /**
  * Run this once (function dropdown next to Run) after adding the bank
  * details as Script Properties. Checks they're all there and shows the
@@ -2231,7 +2297,8 @@ function sendThankYouEmail(v, inv, attachments) {
       "All done, thanks for booking with EasyClean Somerset. Your invoice/receipt is attached.\n\n" +
       (inv.paymentDue ? "Payment of " + v.Total + " is due today by bank transfer. The bank details are on the invoice; please use " + inv.invoiceNo + " as the payment reference.\n\n" : "") +
       aftercareText_(aftercareFor_(v.Items, false)) + "\n\n" +
-      (REVIEW_URL ? "If you've got a minute, a review really helps a small business like ours: " + REVIEW_URL + "\n\n" : "") +
+      (REVIEW_URL ? "If you've got a minute, a Google review really helps a small business like ours: " + REVIEW_URL + "\n" +
+        (TRUSTPILOT_URL ? "Or on Trustpilot: " + TRUSTPILOT_URL + "\n" : "") + "\n" : "") +
       "Thanks again,\nEasyClean Somerset";
   }
 
@@ -2403,15 +2470,16 @@ function sendFollowUpEmail_(v) {
        { text: "If the check-out or inspection flags anything about what we cleaned, tell us by " + deadline + " and we'll come back and re-clean it free of charge. Reply to this email or", link: { label: "message us on WhatsApp", url: waLink } }]
     : [{ text: "Just checking in after we cleaned for you on " + cleanedOn + ". How is everything looking now it's dry?" },
        { text: "If anything isn't right, such as a mark that's come back or an area that still feels damp, tell us by " + deadline + " and we'll come back and re-clean it free of charge. Reply to this email or", link: { label: "message us on WhatsApp", url: waLink } }];
-  if (!isAgent && REVIEW_URL) paras.push({ text: "If you have a minute, we'd welcome a review of how it went." });
+  if (!isAgent && REVIEW_URL) paras.push({ text: "If you have a minute, we'd welcome a Google review of how it went." });
   var textBody = "Hi " + name + ",\n\n" +
     paras.map(function (p) { return p.text + (p.link ? " " + p.link.label + ": " + p.link.url : ""); }).join("\n\n") +
-    (!isAgent && REVIEW_URL ? "\n" + REVIEW_URL : "") +
+    (!isAgent && REVIEW_URL ? "\n" + REVIEW_URL + (TRUSTPILOT_URL ? "\nOr on Trustpilot: " + TRUSTPILOT_URL : "") : "") +
     "\n\nThanks,\nEasyClean Somerset";
   sendCustomerEmail_(v.Email, isAgent ? "Checking in: the clean at " + v.Address : "How's everything looking after your clean?", textBody, {
     htmlBody: buildSimpleEmailHtml({
       name: name, heading: isAgent ? "Checking in on the clean" : "How's it looking?", paragraphs: paras,
-      button: !isAgent && REVIEW_URL ? { text: "Leave us a review", url: REVIEW_URL } : null
+      button: !isAgent && REVIEW_URL ? { text: "Leave us a Google review", url: REVIEW_URL,
+        also: TRUSTPILOT_URL ? { text: "Prefer Trustpilot?", label: "Review us there", url: TRUSTPILOT_URL } : null } : null
     }),
     name: "EasyClean Somerset"
   });
@@ -2457,9 +2525,10 @@ function buildThankYouEmailHtml(d) {
           (d.aftercare ? aftercareHtml_(d.aftercare, { INK: INK, SLATE: SLATE, LINE: LINE, PAPER: PAPER, SANS: SANS }) : '') +
           (REVIEW_URL && !d.isAgent ?
             '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 0 6px;"><tr><td style="background:' + TEAL + ';border-radius:3px;">' +
-              '<a href="' + REVIEW_URL + '" style="display:inline-block;padding:12px 24px;font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;color:' + ON_INK + ';text-decoration:none;">Leave us a review</a>' +
+              '<a href="' + REVIEW_URL + '" style="display:inline-block;padding:12px 24px;font-family:\'Public Sans\',' + SANS + ';font-weight:700;font-size:14.5px;color:' + ON_INK + ';text-decoration:none;">Leave us a Google review</a>' +
             '</td></tr></table>' +
-            '<p style="margin:14px 0 0;font-family:' + SANS + ';font-size:13px;color:' + SLATE + ';">If you&#8217;ve got a minute, it really helps a small business like ours.</p>'
+            '<p style="margin:14px 0 0;font-family:' + SANS + ';font-size:13px;color:' + SLATE + ';">If you&#8217;ve got a minute, a Google review really helps a small business like ours.' +
+              (TRUSTPILOT_URL ? ' Prefer Trustpilot? <a href="' + TRUSTPILOT_URL + '" style="color:' + TEAL + ';font-weight:700;">Review us there</a>.' : '') + '</p>'
             : '') +
         '</td></tr>' +
         '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:22px 28px;text-align:center;">' +
@@ -5169,7 +5238,11 @@ function buildSimpleEmailHtml(d) {
           (d.button
             ? '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:20px 0 0;"><tr><td style="background:' + TEAL + ';border-radius:3px;">' +
                 '<a href="' + esc(d.button.url) + '" style="display:inline-block;padding:12px 24px;font-family:' + SANS + ';font-weight:700;font-size:14.5px;color:' + ON_INK + ';text-decoration:none;">' + esc(d.button.text) + '</a>' +
-              '</td></tr></table>'
+              '</td></tr></table>' +
+              (d.button.also
+                ? '<p style="margin:12px 0 0;font-family:' + SANS + ';font-size:13px;color:' + SLATE + ';">' + esc(d.button.also.text) +
+                    ' <a href="' + esc(d.button.also.url) + '" style="color:' + TEAL + ';font-weight:700;">' + esc(d.button.also.label) + '</a>.</p>'
+                : '')
             : '') +
         '</td></tr>' +
         '<tr><td style="background:' + PAPER + ';border:1px solid ' + LINE + ';border-top:none;padding:20px 28px;text-align:center;font-family:' + SANS + ';font-weight:800;font-size:12.5px;text-transform:uppercase;color:' + SLATE + ';">EasyClean Somerset</td></tr>' +
@@ -5620,6 +5693,14 @@ function dailyHealthCheck_(opts) {
     return names.indexOf("refreshSlotsCache") !== -1 ? "" : "The 10-minute refresh of available times isn't scheduled. Run setUpAutoRefresh once.";
   });
   check("Couldn't open the customer sheet", function () { return getCustomerSheet() ? "" : "The customer sheet can't be found, so bookings aren't being recorded. Run setUpCustomerSheet."; });
+  check("Couldn't check the customer sheet backup", function () {
+    var props = PropertiesService.getScriptProperties();
+    if (!props.getProperty(CUSTOMER_SHEET_PROPERTY_KEY)) return ""; // reported just above
+    var last = props.getProperty(BACKUP_LAST_KEY);
+    if (last && now.getTime() - new Date(last).getTime() < 36 * 3600000) return "";
+    return (last ? "The customer sheet hasn't been backed up since " + fmtWhen(new Date(last)) + "." : "The customer sheet hasn't been backed up yet.") +
+      " Backups happen each morning. To make one now, run backupCustomerSheetNow.";
+  });
   check("Couldn't check the settings", function () {
     var missing = [];
     if (!getAdminUrl()) missing.push("ADMIN_URL");
@@ -5688,7 +5769,7 @@ function dailyHealthCheck_(opts) {
       "More detail is in Apps Script under Executions.";
   } else if (isMonday || opts.force) {
     subject = "Booking system check: all fine";
-    body = "This morning's check found nothing wrong: booking times, prices, service area, email allowance, scheduled jobs, customer sheet, settings, bookings against the calendar and jobs waiting for sign-off.\n\n" +
+    body = "This morning's check found nothing wrong: booking times, prices, service area, email allowance, scheduled jobs, customer sheet and its backup, settings, bookings against the calendar and jobs waiting for sign-off.\n\n" +
       "You get this note once a week. If it stops arriving, the morning job has stopped: run setUpDailyReminders once to restart it.";
   } else {
     return { sent: false, issues: issues, events: events };

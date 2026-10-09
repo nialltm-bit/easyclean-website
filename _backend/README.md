@@ -50,7 +50,16 @@ Check these before changing either side.
 
 ## Morning check
 
-The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. It emails Niall if anything needs a look, including problems noted since the last check, and sends a short "all fine" note on Mondays. It also lists any open booking that's missing from the calendar, and any job done more than 3 days ago (`SIGNOFF_NUDGE_DAYS`) that still isn't signed off, so isn't invoiced. Turned-away website bookings also email him straight away (at most one an hour). To run the check by hand, pick `checkBookingSystem` in the function dropdown and press Run.
+The daily trigger (`sendDayOfReminders`, around 7am) starts with a backup of the customer sheet and ends with a health check. It emails Niall if anything needs a look, including problems noted since the last check, and sends a short "all fine" note on Mondays. It also lists any open booking that's missing from the calendar, and any job done more than 3 days ago (`SIGNOFF_NUDGE_DAYS`) that still isn't signed off, so isn't invoiced. Turned-away website bookings also email him straight away (at most one an hour). To run the check by hand, pick `checkBookingSystem` in the function dropdown and press Run.
+
+## Backups of the customer sheet (FRE-220)
+
+- **What:** the daily trigger starts by copying the whole customer sheet (every tab) into a private Drive folder, "EasyClean Somerset backups", as "Customer sheet backup YYYY-MM-DD" (`backupCustomerSheet_`). It runs before anything else that morning writes to the sheet. Copies older than 30 days (`BACKUP_KEEP_DAYS`) go to the Drive bin, which keeps them another 30 days. Only files named exactly like a backup are ever binned.
+- **Settings:** the folder's ID is kept in Script Properties as `BACKUP_FOLDER_ID` (made the first time), and the last backup time as `BACKUP_LAST_AT`. If the folder is deleted, a new one is made.
+- **Morning check:** says so if there's been no backup for 36 hours. To make one now, pick `backupCustomerSheetNow` in the function dropdown and press Run.
+- **To restore a few rows:** open the backup from the right day, copy the rows you need, and paste them into the live sheet. Don't paste over the header row.
+- **To restore the whole sheet:** open the backup, File > Make a copy, then in Apps Script > Project Settings > Script Properties set `customerSheetId` to the new copy's ID (the long part of its address between `/d/` and `/edit`). Bookings then go to the restored copy. Keep the broken one until you're sure.
+- Backups hold the same personal data as the sheet, so they stay private and are kept 30 days only.
 
 ## Booking times in the sheet (FRE-203)
 
@@ -99,10 +108,17 @@ All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any o
 - `node _tests/booking-times.test.js` checks the saved booking times, the waiting list, putting a deleted event back, the morning check's new lines and one-time booking IDs (FRE-203, FRE-6). It needs no setup.
 - `node _tests/invoices-agencies.test.js` checks the late-payment line, agency name matching and `Same as`, and the job date on jobs signed off later (FRE-195, FRE-203). It needs no setup.
 - `node _tests/customers-and-contacts.test.js` checks jobs dragged in the calendar, repeat customers, the site contact email and link, and marketing consent, unsubscribes and the marketing list (FRE-203, FRE-195). It needs no setup.
+- `node _tests/backup-and-reviews.test.js` checks the daily backup, what it bins and never bins, the morning check's backup line, and the Google-then-Trustpilot review links (FRE-220, FRE-217). It needs no setup.
 - `node _tests/dashboard.test.js` drives `Dashboard.html` in a browser against the same fake, so the page and `Code.gs` are checked together. It needs the Playwright setup from `booking.test.js`.
 - These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
 
 ## Last updated
+
+9 October 2026 (evening):
+
+- Daily backup of the customer sheet into a private Drive folder, kept 30 days, and a morning check line if it stops (FRE-220).
+- Thank-you and 2-day follow-up emails now ask for a Google review (`REVIEW_URL`), with Trustpilot as a second link (`TRUSTPILOT_URL`) (FRE-217).
+- `Code.gs` only. Nothing to run: the first backup is made the next morning. Run `backupCustomerSheetNow` to make one straight away.
 
 9 October 2026 (later still):
 

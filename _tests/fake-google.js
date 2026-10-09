@@ -176,6 +176,8 @@ function loadBackend(options) {
     getBlob() { return this.blob; }
     getSharingAccess() { return this.sharing; }
     setSharing(access) { this.sharing = access; return this; }
+    setTrashed(t) { this.trashed = t; return this; }
+    isTrashed() { return !!this.trashed; }
   }
   class FakeFolder {
     constructor(name, parent) {
@@ -189,7 +191,7 @@ function loadBackend(options) {
     createFolder(name) { const f = new FakeFolder(name, this); this.children.push(f); return f; }
     getFoldersByName(name) { return iterator(this.children.filter((f) => f.name === name && !f.trashed)); }
     createFile(blob) { const f = new FakeFile(blob, this); this.files.push(f); return f; }
-    getFiles() { return iterator(this.files.slice()); }
+    getFiles() { return iterator(this.files.filter((f) => !f.trashed)); }
     setTrashed(t) { this.trashed = t; if (t) delete state.foldersById[this.id]; return this; }
   }
 
@@ -258,6 +260,16 @@ function loadBackend(options) {
       getFoldersByName: (name) => iterator(state.folders.filter((f) => f.name === name && !f.trashed)),
       createFolder(name) { const f = new FakeFolder(name, null); state.folders.push(f); return f; },
       getFolderById(id) { if (!state.foldersById[id]) throw new Error("No folder " + id); return state.foldersById[id]; },
+      // Only the customer sheet is looked up by ID in these tests: its copy
+      // becomes a file named as given, in the folder given.
+      getFileById(id) {
+        const ss = state.spreadsheets[id];
+        if (!ss) throw new Error("No file " + id);
+        return {
+          getId: () => id,
+          makeCopy(name, folder) { state.copies = (state.copies || 0) + 1; return folder.createFile({ name, sourceId: id }); },
+        };
+      },
     },
     CalendarApp: { getDefaultCalendar: () => calendar },
     GmailApp: {
