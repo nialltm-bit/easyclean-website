@@ -60,6 +60,15 @@ The daily trigger (`sendDayOfReminders`, around 7am) ends with a health check. I
 - **Event deleted by hand:** the booking stays in the lists with a "Not in calendar" label. Its job page has a "Put it back in the calendar" button that makes the event again at the saved time (it asks first if something else is now in that slot). Until then its time is free on the website and no reminders go out, which is why the morning check lists it. Cancelling it still works and uses the saved time for the late-cancellation rule. If the customer moves it on their change page, the event is made again at the new time.
 - **Older bookings with no saved time and no event:** these show under "Waiting for sign-off" with the label, with the `Booking time` text as their time. Cancel them so there's a record, or use Edit job to set a time.
 
+## Invoices and the Agencies tab
+
+- **Late payment (FRE-195):** agent invoices that are paid by bank transfer (including £25 fee invoices to agents) end with a line saying statutory interest at 8% above the Bank of England base rate may be charged, plus fixed compensation under the Late Payment of Commercial Debts (Interest) Act 1998: £40 under £1,000, £70 under £10,000, £100 above (`lateFeeCompensation_`). Homeowner invoices never have it (the Act is business to business). The base rate isn't written as a number, since it changes.
+- **Agency names (FRE-195):** the Agencies tab has a `Same as` column.
+  - Names that differ only in capitals, spaces, punctuation, "&" or "and", "The" or "Ltd" count as the same agency automatically (`agencyKey_`).
+  - Other spellings are never merged on their own. When an agent books under a name that's new to the tab, it's added straight away, and the new-booking email says so. If the name looks like an existing one once words like "Lettings" or "Property" are set aside (`agencyCore_`), the email names it. Type the main agency's name in the new row's `Same as` column and its invoices and reminders use the main row's name, billing address and accounts email.
+  - The email also flags a known agency that still has no billing address.
+- **Job date (FRE-203):** when a job is signed off on a later day than the clean (a customer signing the link later), the invoice keeps the sign-off day as its invoice date and adds "Job date". A cash receipt says it was paid on the day of the clean, and `Paid on` is that day. The completion PDF says "Completed" with the clean's date and "Signed" with the sign-off date. The 2-day follow-up names the day of the clean; its re-clean deadline still runs from sign-off. The job date is the timer's start, else the calendar event, else `Starts at`, and never later than the sign-off. Agent invoices are still due 14 days from the invoice date. Income in the figures still counts on the sign-off day.
+
 ## Time on job, photos and figures
 
 All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any of it.
@@ -77,10 +86,15 @@ All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any o
 - `node _tests/change-or-cancel.test.js` checks the change-or-cancel calls, emails and rules (FRE-213). It needs no setup.
 - `node _tests/cancellation-form.test.js` checks the homeowner confirmation email and its cancellation form PDF (FRE-212). It needs no setup.
 - `node _tests/booking-times.test.js` checks the saved booking times, the waiting list, putting a deleted event back, the morning check's new lines and one-time booking IDs (FRE-203, FRE-6). It needs no setup.
+- `node _tests/invoices-agencies.test.js` checks the late-payment line, agency name matching and `Same as`, and the job date on jobs signed off later (FRE-195, FRE-203). It needs no setup.
 - `node _tests/dashboard.test.js` drives `Dashboard.html` in a browser against the same fake, so the page and `Code.gs` are checked together. It needs the Playwright setup from `booking.test.js`.
 - These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
 
 ## Last updated
+
+9 October 2026 (later):
+
+- Late-payment line on agent invoices, agency name matching with a `Same as` column in the Agencies tab, and the real job date on jobs signed off on a later day (FRE-195, FRE-203). `Code.gs` only. Nothing to run: the `Same as` column is added to the Agencies tab the next time it's read.
 
 9 October 2026:
 

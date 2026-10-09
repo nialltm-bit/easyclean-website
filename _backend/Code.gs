@@ -191,7 +191,11 @@ var BANK_PROPERTY_KEYS = {
 // job is completed, its name is added here with the other columns blank,
 // so it's obvious which agencies still need a billing address filling in.
 var AGENCIES_SHEET_NAME = "Agencies";
-var AGENCIES_HEADERS = ["Business name", "Billing address", "Accounts email"];
+var AGENCIES_HEADERS = ["Business name", "Billing address", "Accounts email", "Same as"];
+// "Same as": type another agency's Business name here when two rows are the
+// same agency under different spellings ("Andrews Property" -> "Andrews").
+// Invoices and reminders for that row then use the other row's name, billing
+// address and accounts email. See getAgencyBilling.
 
 // Drive folders for the documents completeJob() generates, each split into
 // a "YYYY-MM" subfolder per month so a year's invoices are easy to hand to
@@ -1032,6 +1036,14 @@ function createBookingLocked_(data) {
       "so it won't appear in the admin app. Add the row by hand from the calendar event.");
   }
 
+  if (data.channel === "Agent/Landlord") {
+    try {
+      data.agencyCheck = findOrAddAgency_(data.businessName);
+    } catch (agencyErr) {
+      noteProblem_("Checking the Agencies tab failed for " + reference, agencyErr);
+    }
+  }
+
   try {
     sendNewBookingAlert(data, reference, jobToken, start, priced);
   } catch (alertErr) {
@@ -1721,7 +1733,11 @@ function completeJobLocked_(data) {
   var invoiceNumber = nextInvoiceNumber(true); // already holding the script lock
   var completedAt = new Date();
   var v = row.values;
+  // The day the clean was done, which is earlier than today when the
+  // customer signs a link later (FRE-203).
+  var jobDate = jobDateFor_(v, completedAt);
   var inv = buildInvoiceContext(v, invoiceNumber, completedAt);
+  inv.jobDate = jobDate;
 
   // Build each PDF once, then use the same file both for the Drive copy and
   // the email attachment, so what's on file is exactly what was sent.
@@ -1740,13 +1756,13 @@ function completeJobLocked_(data) {
       noteProblem_("Reading the job photos for the completion PDF failed for " + ref, err);
     }
     try {
-      completionBlob = buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, data.signature, photos);
+      completionBlob = buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, data.signature, photos, jobDate);
     } catch (err) {
       noteProblem_("Job completion PDF failed for " + ref, err);
       if (photos) {
         // Try again without the photos, so the customer still gets the signed confirmation.
         try {
-          completionBlob = buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, data.signature, null);
+          completionBlob = buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, data.signature, null, jobDate);
         } catch (err2) {
           noteProblem_("Job completion PDF failed again, without photos, for " + ref, err2);
         }
@@ -1788,7 +1804,8 @@ function completeJobLocked_(data) {
     // Cash/on-the-day payments are paid at completion. Agent bank transfers
     // stay blank until Niall fills this in when the money arrives, which is
     // what makes "who still owes me" a simple filter on this column.
-    "Paid on": inv.paymentDue ? "" : completedAt
+    // Paid on the day of the clean (cash or no charge).
+    "Paid on": inv.paymentDue ? "" : jobDate
   };
   Object.keys(writes).forEach(function (header) {
     sheet.getRange(row.rowIndex, headerRow.indexOf(header) + 1).setValue(writes[header]);
@@ -1921,6 +1938,25 @@ function buildInvoiceContext(v, invoiceNumber, completedAt) {
   return ctx;
 }
 
+// Late payment on business invoices (FRE-195). The Late Payment of
+// Commercial Debts (Interest) Act 1998 applies to business-to-business
+// invoices: statutory interest at 8% over the Bank of England base rate, plus
+// fixed compensation by size of debt (GOV.UK, checked 9 Oct 2026). Our terms
+// set no other rate, so the statutory one applies. The base rate isn't
+// written as a number, since it changes.
+function lateFeeCompensation_(amount) {
+  if (!(amount > 0)) return 40;
+  if (amount >= 10000) return 100;
+  if (amount >= 1000) return 70;
+  return 40;
+}
+
+function latePaymentText_(totalText) {
+  var amount = parseMoney_(totalText);
+  return "If this invoice isn't paid by the due date, we may charge statutory interest at 8% above the Bank of England base rate, " +
+    "plus \u00a3" + lateFeeCompensation_(amount) + " fixed compensation, under the Late Payment of Commercial Debts (Interest) Act 1998.";
+}
+
 // Invoice numbers are stored as plain numbers in the sheet (1001, 1002...)
 // and shown on documents and used as the bank payment reference as INV-1001.
 function formatInvoiceNo(n) {
@@ -1938,37 +1974,136 @@ function getBankDetails() {
   return bank;
 }
 
-// Looks an agency up by name (ignoring case and extra spaces) on the
-// Agencies tab, creating the tab if it doesn't exist yet and adding the
-// agency with blank details if it isn't listed, so Niall can see which ones
-// need a billing address. Returns { businessName, billingAddress, accountsEmail }.
-function getAgencyBilling(businessName) {
-  var none = { billingAddress: "", accountsEmail: "" };
+// ---- Agencies tab: matching agency names (FRE-195) ----
+// Agents type their business name on the booking form, so one agency can
+// arrive under several spellings. Three layers:
+//   1. Names that differ only in capitals, spaces, punctuation, "&" or
+//      "and", "The" or "Ltd"/"Limited" are the same agency, automatically.
+//   2. The "Same as" column links one row to another, for spellings Niall
+//      confirms are the same ("Andrews Property" -> "Andrews").
+//   3. A new name that looks like an existing one (same name once words like
+//      "Lettings" or "Property" are set aside) is never merged on its own;
+//      the new-booking email points it out so Niall can fill in "Same as".
+
+// "The Andrews & Co. Ltd" -> "andrews and co"
+function agencyKey_(name) {
+  var s = String(name || "").toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[‘’'`.,()\-\/]/g, " ")
+    .replace(/\s+/g, " ").trim();
+  s = s.replace(/^the /, "");
+  s = s.replace(/ (ltd|limited|llp|plc)$/, "");
+  return s.trim();
+}
+
+var AGENCY_GENERIC_WORDS = ["and", "the", "ltd", "limited", "llp", "plc", "co", "company", "uk", "group",
+  "letting", "lettings", "let", "lets", "agent", "agents", "agency", "estate", "estates", "property",
+  "properties", "homes", "residential", "sales", "management", "rentals"];
+
+// The distinctive part of a name: "Andrews Property Lettings" -> "andrews".
+function agencyCore_(name) {
+  return agencyKey_(name).split(" ").filter(function (w) {
+    return w && AGENCY_GENERIC_WORDS.indexOf(w) === -1;
+  }).join(" ");
+}
+
+function agenciesTab_(create) {
   var sheetId = PropertiesService.getScriptProperties().getProperty(CUSTOMER_SHEET_PROPERTY_KEY);
-  if (!sheetId || !businessName) return none;
+  if (!sheetId) return null;
   var ss = SpreadsheetApp.openById(sheetId);
   var tab = ss.getSheetByName(AGENCIES_SHEET_NAME);
-  if (!tab) {
+  if (!tab && create) {
     tab = ss.insertSheet(AGENCIES_SHEET_NAME);
     tab.getRange(1, 1, 1, AGENCIES_HEADERS.length).setValues([AGENCIES_HEADERS]).setFontWeight("bold");
     tab.setFrozenRows(1);
   }
-  var norm = function (s) { return String(s || "").trim().replace(/\s+/g, " ").toLowerCase(); };
+  if (tab) ensureColumns(tab, AGENCIES_HEADERS);
+  return tab;
+}
+
+function readAgencies_(tab) {
   var data = tab.getDataRange().getValues();
   var header = data[0];
-  var nameCol = header.indexOf("Business name");
+  var out = [];
   for (var i = 1; i < data.length; i++) {
-    if (norm(data[i][nameCol]) === norm(businessName)) {
-      var r = rowToObject(header, data[i]);
-      return {
-        businessName: String(r["Business name"] || "").trim(),
-        billingAddress: String(r["Billing address"] || "").trim(),
-        accountsEmail: String(r["Accounts email"] || "").trim()
-      };
+    var r = rowToObject(header, data[i]);
+    var name = String(r["Business name"] || "").trim();
+    if (!name) continue;
+    out.push({
+      businessName: name,
+      billingAddress: String(r["Billing address"] || "").trim(),
+      accountsEmail: String(r["Accounts email"] || "").trim(),
+      sameAs: String(r["Same as"] || "").trim()
+    });
+  }
+  return out;
+}
+
+// Follows "Same as" (up to 3 links, so a loop can't hang it).
+function resolveAgency_(list, row) {
+  var seen = 0;
+  while (row && row.sameAs && seen < 3) {
+    var key = agencyKey_(row.sameAs);
+    var next = null;
+    for (var i = 0; i < list.length; i++) {
+      if (agencyKey_(list[i].businessName) === key) { next = list[i]; break; }
+    }
+    if (!next || next === row) break;
+    row = next;
+    seen++;
+  }
+  return row;
+}
+
+// Finds an agency on the Agencies tab, adding it (details blank) if it isn't
+// there, so Niall can see which ones need a billing address. Returns
+// { businessName, billingAddress, accountsEmail, added, looksLike: [names] }.
+// businessName etc. come from the "Same as" row when there is one.
+function findOrAddAgency_(businessName) {
+  var none = { businessName: "", billingAddress: "", accountsEmail: "", added: false, looksLike: [] };
+  if (!String(businessName || "").trim()) return none;
+  var tab = agenciesTab_(true);
+  if (!tab) return none;
+  var list = readAgencies_(tab);
+  var key = agencyKey_(businessName);
+  for (var i = 0; i < list.length; i++) {
+    if (agencyKey_(list[i].businessName) === key) {
+      var r = resolveAgency_(list, list[i]);
+      return { businessName: r.businessName, billingAddress: r.billingAddress, accountsEmail: r.accountsEmail, added: false, looksLike: [] };
     }
   }
-  tab.appendRow(header.map(function (h) { return h === "Business name" ? businessName : ""; }));
-  return none;
+  var core = agencyCore_(businessName);
+  var looksLike = [];
+  if (core) {
+    list.forEach(function (a) {
+      if (a.sameAs) return; // point at the main row, not its other spellings
+      if (agencyCore_(a.businessName) === core) looksLike.push(a.businessName);
+    });
+  }
+  var header = tab.getRange(1, 1, 1, tab.getLastColumn()).getValues()[0];
+  tab.appendRow(header.map(function (h) { return h === "Business name" ? String(businessName).trim() : ""; }));
+  return { businessName: "", billingAddress: "", accountsEmail: "", added: true, looksLike: looksLike };
+}
+
+// Kept for the invoice and reminder code: { businessName, billingAddress, accountsEmail }.
+function getAgencyBilling(businessName) {
+  var a = findOrAddAgency_(businessName);
+  return { businessName: a.businessName, billingAddress: a.billingAddress, accountsEmail: a.accountsEmail };
+}
+
+// The line for the new-booking email, or "" if the agency is all set.
+function agencyAlertText_(businessName, check) {
+  if (!check) return "";
+  var name = String(businessName || "").trim();
+  if (check.added && check.looksLike.length) {
+    var other = check.looksLike[0];
+    return "\"" + name + "\" is new in the Agencies tab, but looks like \"" + other + "\"" +
+      (check.looksLike.length > 1 ? " (or " + check.looksLike.slice(1).map(function (n) { return "\"" + n + "\""; }).join(", ") + ")" : "") +
+      ". If it's the same agency, type " + other + " in its Same as column, so the invoice uses " + other + "'s billing address.";
+  }
+  if (check.added) return "\"" + name + "\" is a new agency. Add its billing address in the Agencies tab before the job, so the invoice has it.";
+  if (!check.billingAddress) return "There's no billing address for \"" + (check.businessName || name) + "\" in the Agencies tab yet. Add it before the job, so the invoice has it.";
+  return "";
 }
 
 // Saves a generated PDF into <root folder>/<YYYY-MM>/ in Niall's Drive.
@@ -2005,7 +2140,11 @@ function checkInvoiceSettings() {
   if (!tab) { Logger.log("No Agencies tab yet. It's created the first time an agent job is completed."); return; }
   var data = tab.getDataRange().getValues();
   var header = data[0];
-  var missing = data.slice(1).filter(function (r) { return !String(r[header.indexOf("Billing address")] || "").trim(); })
+  var sameCol = header.indexOf("Same as");
+  var missing = data.slice(1).filter(function (r) {
+    return String(r[header.indexOf("Business name")] || "").trim() && !String(r[header.indexOf("Billing address")] || "").trim() &&
+      !(sameCol !== -1 && String(r[sameCol] || "").trim());
+  })
     .map(function (r) { return r[header.indexOf("Business name")]; });
   Logger.log(missing.length ? "Agencies missing a billing address: " + missing.join(", ") : "All agencies have a billing address.");
 }
@@ -2106,11 +2245,12 @@ function sendThankYouEmail(v, inv, attachments) {
 // (as happened 21 Sept 2026, before a Drive authorisation gap was found
 // and fixed) silently never saved in the first place. Same rendering
 // approach as the invoice: HtmlService -> PDF, plain CSS, self-contained.
-function buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, signatureDataUrl, photos) {
+function buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, signatureDataUrl, photos, jobDate) {
   var esc = escHtml;
   var lines = parseItemLines(v.Items);
   var billToName = v.Channel === "Agent/Landlord" ? v["Business name"] : v.Name;
   var dateStr = Utilities.formatDate(completedAt, TIMEZONE, "d MMMM yyyy");
+  var jobDateStr = jobDate ? Utilities.formatDate(jobDate, TIMEZONE, "d MMMM yyyy") : dateStr;
   var LOGO_URL = SITE_URL + "/apple-touch-icon.png";
 
   var itemsList = lines.map(function (l) {
@@ -2136,7 +2276,8 @@ function buildJobCompletionPdfBlob(v, invoiceNumber, completedAt, signatureDataU
     '</style></head><body>' +
     '<div class="brand"><img src="' + LOGO_URL + '" width="32" height="32" alt="" /><h1>Job Completion Confirmation</h1></div>' +
     '<div class="muted">Reference ' + esc(v.Reference) + '</div>' +
-    '<div class="muted">Completed ' + esc(dateStr) + '</div>' +
+    '<div class="muted">Completed ' + esc(jobDateStr) + '</div>' +
+    (jobDateStr !== dateStr ? '<div class="muted">Signed ' + esc(dateStr) + '</div>' : '') +
     '<div class="muted" style="margin-top:14px;">' + esc(billToName) + '</div>' +
     '<div class="muted">' + esc(v.Address) + '</div>' +
     '<div class="muted" style="font-size:10px;letter-spacing:0.08em;text-transform:uppercase;margin-top:18px;">Work completed</div>' +
@@ -2240,7 +2381,7 @@ function sendFollowUpEmail_(v) {
   var isAgent = v.Channel === "Agent/Landlord";
   var name = isAgent ? (v.Name || v["Business name"]) : v.Name;
   var completed = v["Completed at"];
-  var cleanedOn = Utilities.formatDate(completed, TIMEZONE, "EEEE d MMMM");
+  var cleanedOn = Utilities.formatDate(jobDateFor_(v, completed, true), TIMEZONE, "EEEE d MMMM");
   var deadline = Utilities.formatDate(new Date(completed.getTime() + 7 * 86400000), TIMEZONE, "EEEE d MMMM");
   var waLink = "https://wa.me/" + WHATSAPP_NUMBER + "?text=" + encodeURIComponent("Hi EasyClean Somerset, about the clean on " + cleanedOn + ". Ref: " + v.Reference);
   // Each paragraph: text, plus an optional link (shown as words in the HTML
@@ -2328,6 +2469,9 @@ function buildInvoicePdfBlob(v, inv) {
   var esc = escHtml;
   var lines = parseItemLines(v.Items);
   var dateStr = Utilities.formatDate(inv.completedAt, TIMEZONE, "d MMMM yyyy");
+  // The clean's own date, shown when it's earlier than the invoice date (a
+  // job signed off later). Cash is paid on the day of the clean.
+  var jobDateStr = inv.jobDate ? Utilities.formatDate(inv.jobDate, TIMEZONE, "d MMMM yyyy") : dateStr;
   // Same brand-kit icon the site favicon and email headers use, so the
   // invoice carries the current logo automatically whenever that file
   // is updated — nothing here to touch when the mark changes again.
@@ -2347,6 +2491,7 @@ function buildInvoicePdfBlob(v, inv) {
   // reference so their accounts team can match it.
   var meta = '<div class="muted">' + esc(inv.invoiceNo) + '</div>' +
     '<div class="muted">Invoice date ' + esc(dateStr) + '</div>' +
+    (jobDateStr !== dateStr ? '<div class="muted">Job date ' + esc(jobDateStr) + '</div>' : '') +
     (inv.paymentDue ? '<div class="muted">Due ' + esc(Utilities.formatDate(inv.dueDate, TIMEZONE, "d MMMM yyyy")) + '</div>' : '') +
     '<div class="muted">Job ref ' + esc(v.Reference) + '</div>' +
     (inv.isAgent && v["Agent/Agency ID"] ? '<div class="muted">Your ref ' + esc(v["Agent/Agency ID"]) + '</div>' : '');
@@ -2383,7 +2528,7 @@ function buildInvoicePdfBlob(v, inv) {
   } else {
     payment = v["Payment method"] === "No charge"
       ? '<div class="foot">No charge. Thanks for using EasyClean Somerset.</div>'
-      : '<div class="foot">Paid by ' + esc(v["Payment method"]) + ' on ' + esc(dateStr) + '. Thanks for booking with EasyClean Somerset.</div>';
+      : '<div class="foot">Paid by ' + esc(v["Payment method"]) + ' on ' + esc(jobDateStr) + '. Thanks for booking with EasyClean Somerset.</div>';
   }
 
   var html =
@@ -2431,6 +2576,7 @@ function buildInvoicePdfBlob(v, inv) {
       '<tr class="total-row"><td>Total' + (inv.paymentDue ? ' due' : '') + '</td><td class="amt">' + esc(v.Total) + '</td></tr>' +
     '</table>' +
     payment +
+    (inv.isAgent && inv.paymentDue ? '<div class="foot">' + esc(latePaymentText_(v.Total)) + '</div>' : '') +
     (inv.paymentDue ? '<div class="foot">Thanks for using EasyClean Somerset.</div>' : '') +
     '</body></html>';
 
@@ -3214,6 +3360,25 @@ var START_COLUMNS = ["Starts at", "Ends at"];
 var SIGNOFF_NUDGE_DAYS = 3;
 
 function sheetStart_(v) { return validDate_(v["Starts at"]); }
+
+// The day a job was actually done: when the timer was started, or the
+// booking's time (calendar first, then the time saved in the sheet). Never
+// later than `notAfter` (the sign-off), and that's the answer if nothing else
+// is known. sheetOnly skips the calendar (for jobs long since signed off).
+function jobDateFor_(v, notAfter, sheetOnly) {
+  var d = validDate_(v["Started at"]);
+  if (!d && !sheetOnly) {
+    try {
+      var ev = findBookingEvent_(v.Reference, sheetStart_(v));
+      if (ev) d = ev.getStartTime();
+    } catch (err) {
+      console.error("Calendar lookup for the job date failed for " + v.Reference + ": " + err);
+    }
+  }
+  if (!d) d = sheetStart_(v);
+  if (!d || (notAfter && d.getTime() > notAfter.getTime())) return notAfter || null;
+  return d;
+}
 function sheetEnd_(v) { return validDate_(v["Ends at"]); }
 
 // Every booking event in a window, by reference (one calendar lookup).
@@ -5199,6 +5364,7 @@ function sendNewBookingAlert(data, reference, jobToken, start, priced) {
     "Email: " + data.email
   ];
   if (isAgent) lines.push("Access: " + accessEmailText(data));
+  var agencyNote = isAgent ? agencyAlertText_(data.businessName, data.agencyCheck) : "";
   if (data.referralCode) lines.push("Referral/offer code: " + data.referralCode);
   if (data.agencyId) lines.push("Agent's reference: " + data.agencyId);
   if (data.notes) lines.push("Notes: " + data.notes);
@@ -5208,6 +5374,7 @@ function sendNewBookingAlert(data, reference, jobToken, start, priced) {
       "As it stands they could cancel up to " + data.cancellation.deadline + " and pay nothing for work done. Worth asking them to confirm by message that they want it done early.");
   }
   if (priced && priced.adjusted) lines.push("", "NOTE: the page showed " + priced.pageTotal + " but the price list gives " + data.total + ". Booked at " + data.total + ".");
+  if (agencyNote) lines.push("", "NOTE: " + agencyNote);
   if (data.areaUnchecked) lines.push("", "NOTE: the service area list couldn't be read, so the postcode wasn't checked. Worth a quick look at where this is.");
   if (priced && priced.verified === false) lines.push("", "NOTE: the price list couldn't be checked, so this was booked at the price the page sent. Worth a quick check.");
   var link = adminJobLink(jobToken, reference);
