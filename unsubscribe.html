@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stop marketing emails | EasyClean Somerset</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<link rel="preload" href="assets/fonts/public-sans-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/big-shoulders-display-latin-800-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="assets/fonts/fonts.css">
+
+<style>
+  /* The page linked from the bottom of every marketing email, as
+     unsubscribe.html?u=<32 character token>. Same look as my-booking.html.
+     Nothing is sent until the button is pressed (email scanners open links).
+     No GA4/OG/SEO/analytics: the token in the URL must not go anywhere else. */
+  :root {
+    --ink: #12232B;
+    --ink-soft: #2A3D46;
+    --paper: #F5F7F6;
+    --surface: #FFFFFF;
+    --teal: #0E7C86;
+    --teal-deep: #0A5960;
+    --slate: #5C6F73;
+    --line: #DCE3E2;
+    --stamp: #B5461E;
+    --on-ink: #F5F7F6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink: #E9EEEC; --ink-soft: #C4D0CD; --paper: #0D1A1F; --surface: #15262C;
+      --teal: #3FB8C4; --teal-deep: #6ED2DB; --slate: #8FA3A2;
+      --line: #24383E; --stamp: #E58256; --on-ink: #0D1A1F;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Public Sans", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 20px 16px 48px; }
+  header.top { display: flex; align-items: center; gap: 10px; padding: 6px 0 20px; }
+  header.top img { width: 32px; height: 32px; display: block; }
+  header.top .word { font-family: "Big Shoulders Display", sans-serif; font-weight: 800; font-size: 19px; text-transform: uppercase; letter-spacing: 0.01em; }
+  header.top .word span { color: var(--teal); }
+  h1 { font-family: "Big Shoulders Display", sans-serif; font-size: 26px; font-weight: 800; margin: 0 0 18px; letter-spacing: -0.01em; }
+  h1:focus { outline: none; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px 18px; margin-bottom: 18px; }
+  .success { border-top: 3px solid var(--teal); }
+  .error { border-top: 3px solid var(--stamp); }
+  .msg { font-size: 14.5px; line-height: 1.6; color: var(--slate); margin: 0 0 16px; }
+  .card .msg:last-child { margin-bottom: 0; }
+  .state { display: none; }
+  .state.active { display: block; }
+  button {
+    font-family: "Public Sans", Arial, sans-serif;
+    font-weight: 700;
+    font-size: 14.5px;
+    border: none;
+    border-radius: 4px;
+    padding: 13px 18px;
+    cursor: pointer;
+  }
+  .btn-primary { background: var(--stamp); color: #FFFFFF; width: 100%; min-height: 48px; }
+  .btn-primary[disabled] { opacity: 0.4; cursor: not-allowed; }
+  @media (prefers-color-scheme: dark) { .btn-primary { color: #0D1A1F; } }
+  .status { margin: 12px 0 0; padding: 10px 12px; border-radius: 5px; font-size: 14px; line-height: 1.5; background: color-mix(in srgb, var(--stamp) 16%, transparent); color: var(--ink); }
+  .status[hidden] { display: none; }
+  .contact-links { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+  .contact-links a { display: block; text-align: center; padding: 13px 18px; border: 1px solid var(--line); border-radius: 4px; font-weight: 700; font-size: 14.5px; text-decoration: none; min-height: 48px; }
+  .trader { margin: 28px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--slate); }
+  a { color: var(--teal-deep); }
+  :focus-visible { outline: 3px solid var(--teal); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <header class="top">
+    <img src="apple-touch-icon.png" alt="">
+    <div class="word">Easy<span>Clean</span> Somerset</div>
+  </header>
+
+  <section id="state-bad" class="state" aria-labelledby="h-bad">
+    <h1 id="h-bad" tabindex="-1">This link doesn&#8217;t look right</h1>
+    <div class="card error">
+      <p class="msg" id="bad-text">This link doesn&#8217;t look right. Reply STOP to any of our emails, or WhatsApp us, and we&#8217;ll take you off the list.</p>
+      <p class="contact-links" data-contact></p>
+    </div>
+  </section>
+
+  <section id="state-ask" class="state" aria-labelledby="h-ask">
+    <h1 id="h-ask" tabindex="-1">Stop marketing emails</h1>
+    <div class="card">
+      <p class="msg">You&#8217;ll stop getting offers and reminders from EasyClean Somerset. Emails about a booking you make still come as normal.</p>
+      <button type="button" class="btn-primary" id="btn-stop">Stop marketing emails</button>
+      <p class="status" id="stop-status" role="status" hidden></p>
+    </div>
+  </section>
+
+  <section id="state-done" class="state" aria-labelledby="h-done">
+    <h1 id="h-done" tabindex="-1">Stop marketing emails</h1>
+    <div class="card success">
+      <p class="msg" id="done-text"></p>
+    </div>
+  </section>
+
+  <p class="trader">Niall Maher trading as EasyClean Somerset, Midsomer Norton. <a href="terms.html#business-details">Business details</a></p>
+
+</main>
+
+<script>
+  var APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzib7aiWlTG1JN1vawUToNL2r9OYoFp-fJYNsbvJdhHAHtLaddPr0wMKYnxYLwoQxt_GA/exec";
+  var WHATSAPP_NUMBER = "447873212249";
+
+  var token = new URLSearchParams(window.location.search).get("u");
+  var sending = false;
+
+  function $(id) { return document.getElementById(id); }
+
+  // Shows one state and moves keyboard focus to its heading.
+  function showState(id) {
+    document.querySelectorAll(".state").forEach(function (el) { el.classList.remove("active"); });
+    var el = $(id);
+    el.classList.add("active");
+    el.querySelector("h1").focus({ preventScroll: true });
+    window.scrollTo(0, 0);
+  }
+
+  var waText = "Hi, please take me off the EasyClean marketing email list.";
+  document.querySelectorAll("[data-contact]").forEach(function (el) {
+    el.innerHTML = '<a href="https://wa.me/' + WHATSAPP_NUMBER + '?text=' + encodeURIComponent(waText) + '">Message us on WhatsApp</a>';
+  });
+
+  function post(body) {
+    return fetch(APPS_SCRIPT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids a CORS preflight
+      body: JSON.stringify(body)
+    }).then(function (r) { return r.json(); });
+  }
+
+  function setStatus(text) {
+    var el = $("stop-status");
+    el.textContent = text || "";
+    el.hidden = !text;
+  }
+
+  function stop() {
+    if (sending) { return; }
+    sending = true;
+    var btn = $("btn-stop");
+    btn.disabled = true;
+    setStatus("");
+    post({ action: "unsubscribe", u: token })
+      .then(function (data) {
+        if (data && data.ok) {
+          $("done-text").textContent = data.already
+            ? "You’re already unsubscribed. You won’t get any more marketing emails from us."
+            : "Done. You won’t get any more marketing emails from us.";
+          showState("state-done");
+          return;
+        }
+        if (data && data.error === "not_found") { showState("state-bad"); return; }
+        throw new Error((data && data.error) || "unknown");
+      })
+      .catch(function () {
+        setStatus("Something went wrong. Please try again, or reply STOP to any of our emails.");
+        btn.disabled = false;
+      })
+      .then(function () { sending = false; });
+  }
+
+  // Nothing is sent on load: email scanners open links.
+  if (token && /^[0-9a-f]{32}$/i.test(token)) {
+    showState("state-ask");
+    $("btn-stop").addEventListener("click", stop);
+  } else {
+    showState("state-bad");
+  }
+</script>
+</body>
+</html>
