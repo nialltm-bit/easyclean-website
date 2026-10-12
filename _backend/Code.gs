@@ -299,6 +299,10 @@ function doPost(e) {
     if (data.action === "reschedule") {
       return jsonResponse(rescheduleBookingPublic(data));
     }
+    // unsubscribe.html: the link in a marketing email (FRE-219)
+    if (data.action === "unsubscribe") {
+      return jsonResponse(unsubscribePublic(data));
+    }
     return jsonResponse({ ok: false, error: "unknown_action" });
   } catch (err) {
     noteProblem_("Website booking or sign-off request failed", err);
@@ -3845,17 +3849,102 @@ function adminSetUnsubscribed(token, unsubscribe) {
   if (!row) return { ok: false, error: "not_found" };
   var ek = emailKey_(row.values.Email);
   if (!ek) return { ok: false, error: "This booking has no email address." };
+  var when = new Date();
+  var changed = setUnsubscribedFor_(ek, unsubscribe ? when : "");
+  return { ok: true, unsubscribed: !!unsubscribe, rows: changed, on: unsubscribe ? fmtDay(when) : "" };
+}
+
+// Sets (a Date) or clears ("") "Unsubscribed on" on every booking with that
+// email. Returns how many rows.
+function setUnsubscribedFor_(ek, value) {
   var sheet = getCustomerSheet();
   var header = ensureColumns(sheet, [UNSUBSCRIBED_COLUMN]);
   var data = sheet.getDataRange().getValues();
   var col = header.indexOf(UNSUBSCRIBED_COLUMN), emailCol = header.indexOf("Email");
-  var when = new Date(), changed = 0;
+  var changed = 0;
   for (var i = 1; i < data.length; i++) {
     if (emailKey_(data[i][emailCol]) !== ek) continue;
-    sheet.getRange(i + 1, col + 1).setValue(unsubscribe ? when : "");
+    sheet.getRange(i + 1, col + 1).setValue(value);
     changed++;
   }
-  return { ok: true, unsubscribed: !!unsubscribe, rows: changed, on: unsubscribe ? fmtDay(when) : "" };
+  return changed;
+}
+
+// ---- One-click unsubscribe link (FRE-219) ----
+// Every marketing email must carry the person's own link:
+// unsubscribe.html?u=<token>. The token is random, kept in the "Unsubscribe
+// token" column on that person's bookings (one token per email address),
+// and only ever unsubscribes that email from marketing. It can't open,
+// change or cancel a booking, and the page never shows the email address.
+// Booking emails (confirmations, reminders, invoices) are never affected.
+//
+// Apps Script can't add a List-Unsubscribe header to Gmail messages, so the
+// link in the email body is the way to unsubscribe, plus "reply STOP".
+var UNSUB_TOKEN_COLUMN = "Unsubscribe token";
+var UNSUB_PAGE_URL = SITE_URL + "/unsubscribe.html";
+
+// The person's unsubscribe link, making their token the first time.
+function unsubscribeLinkFor_(email) {
+  var ek = emailKey_(email);
+  var sheet = ek ? getCustomerSheet() : null;
+  if (!sheet) return "";
+  var header = ensureColumns(sheet, [UNSUB_TOKEN_COLUMN]);
+  var data = sheet.getDataRange().getValues();
+  var col = header.indexOf(UNSUB_TOKEN_COLUMN), emailCol = header.indexOf("Email");
+  var token = "", missing = [];
+  for (var i = 1; i < data.length; i++) {
+    if (emailKey_(data[i][emailCol]) !== ek) continue;
+    if (isPlausibleToken(data[i][col])) { if (!token) token = data[i][col]; }
+    else missing.push(i + 1);
+  }
+  if (!token) token = newJobToken();
+  missing.forEach(function (r) {
+    var cell = sheet.getRange(r, col + 1);
+    cell.setNumberFormat("@");
+    cell.setValue(token);
+  });
+  return UNSUB_PAGE_URL + "?u=" + token;
+}
+
+// The footer every marketing email ends with: { text, html }.
+function marketingFooter_(email) {
+  var link = unsubscribeLinkFor_(email);
+  if (!link) throw new Error("No unsubscribe link for " + email + ", so no marketing email can go to them.");
+  return {
+    text: "You're getting this because you ticked the box to hear from us when you booked. " +
+      "To stop these emails, use this link: " + link + " or reply STOP. Booking emails aren't affected.",
+    html: '<p style="margin:16px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#5C6F73;text-align:center;">' +
+      "You&#8217;re getting this because you ticked the box to hear from us when you booked. " +
+      '<a href="' + escHtml(link) + '" style="color:#0A5960;font-weight:700;">Unsubscribe</a> or reply STOP. Booking emails aren&#8217;t affected.</p>',
+    link: link
+  };
+}
+
+// POST { action: "unsubscribe", u }. Returns { ok, already } or
+// { ok: false, error: "not_found" | "busy" }.
+function unsubscribePublic(data) {
+  data = data || {};
+  if (!isPlausibleToken(data.u)) return { ok: false, error: "not_found" };
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(20000); } catch (e) { return { ok: false, error: "busy" }; }
+  try {
+    var row = findBookingByTokenColumn_(UNSUB_TOKEN_COLUMN, data.u);
+    if (!row) return { ok: false, error: "not_found" };
+    var ek = emailKey_(row.values.Email);
+    if (!ek) return { ok: false, error: "not_found" };
+    var person = marketingPeople_(getCustomerSheet())[ek];
+    // Already off the list (unsubscribed after their latest opt-in, or never
+    // opted in with an unsubscribe on record): leave the date as it is.
+    if (person && !person.subscribed && person.unsubscribed) return { ok: true, already: true };
+    setUnsubscribedFor_(ek, new Date());
+    try {
+      notifyOwner("Unsubscribed: " + row.values.Email,
+        (row.values.Name || row.values.Email) + " used the unsubscribe link in a marketing email. They're off the marketing list; booking emails still go to them as normal.");
+    } catch (err) { /* the unsubscribe itself is saved */ }
+    return { ok: true, already: false };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // The marketing status for one booking's email, for the job page.
@@ -3914,15 +4003,15 @@ function refreshMarketingList() {
     .sort(function (a, b) { return (b.lastBooked ? b.lastBooked.getTime() : 0) - (a.lastBooked ? a.lastBooked.getTime() : 0); });
   var ss = SpreadsheetApp.openById(PropertiesService.getScriptProperties().getProperty(CUSTOMER_SHEET_PROPERTY_KEY));
   var tab = ss.getSheetByName(MARKETING_LIST_SHEET_NAME) || ss.insertSheet(MARKETING_LIST_SHEET_NAME);
-  var header = ["Email", "Name", "Channel", "Last booked", "Consent", "Consent given"];
+  var header = ["Email", "Name", "Channel", "Last booked", "Consent", "Consent given", "Unsubscribe link"];
   var values = [header].concat(rows.map(function (p) {
-    return [p.email, p.name, p.channel, p.lastBooked || "", p.consent, p.consentAt || ""];
+    return [p.email, p.name, p.channel, p.lastBooked || "", p.consent, p.consentAt || "", unsubscribeLinkFor_(p.email)];
   }));
   tab.clear();
   tab.getRange(1, 1, values.length, header.length).setValues(values);
   tab.getRange(1, 1, 1, header.length).setFontWeight("bold");
   tab.setFrozenRows(1);
-  Logger.log(rows.length + " people on the marketing list. Every marketing email must say how to unsubscribe (reply STOP).");
+  Logger.log(rows.length + " people on the marketing list. Every marketing email must include that person's own unsubscribe link (last column).");
   return rows.length;
 }
 

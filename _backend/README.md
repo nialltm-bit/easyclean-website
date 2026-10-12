@@ -46,6 +46,10 @@ Check these before changing either side.
   - `GET ?action=rescheduleSlots&t=` returns the same shape as `?action=slots`, for this job's length, with its own time not counted as busy.
   - `POST { action: "cancel", t, reason }` and `POST { action: "reschedule", t, date: "yyyy-MM-dd", time: "HH:mm", earlyStart }` return `{ ok }` or an error: `not_found`, `cancelled`, `completed`, `started`, `slot_taken`, `needs_early_start`, `no_moves_left`, `busy`, `server_error`.
   - **Rules:** changes until the clean starts; at most 2 online moves (`MAX_ONLINE_MOVES`); a new time follows the booking rules; a homeowner moving into their 14 days must tick the early-start box; online cancellations never carry a fee. `cancel` reasons are only kept if they're one of the page's four buttons.
+- **Unsubscribe page (FRE-219):** `unsubscribe.html?u=<unsubscribe token>` is the link at the bottom of every marketing email (`marketingFooter_`), and in the last column of the Marketing list tab.
+  - `POST { action: "unsubscribe", u }` returns `{ ok: true, already }` (`already` is true if they were off the list already) or `{ ok: false, error }` with `not_found`, `busy` or `server_error`.
+  - The token is its own column (`Unsubscribe token`), one per email address, made the first time a link is needed. It only unsubscribes that email from marketing: it can't open, change, cancel or sign off a booking, and the reply never includes the email address.
+  - The page must only send the POST when the person presses the button, never on page load (email scanners open links).
 - **WhatsApp number:** `WHATSAPP_NUMBER` in Code.gs must match the one in `booking.js`.
 
 ## Morning check
@@ -78,7 +82,8 @@ The daily trigger (`sendDayOfReminders`, around 7am) starts with a backup of the
   - Each opt-in saves the exact words of the tick box and the date, in `Marketing consent`. The words come from `MARKETING_CONSENT_TEXT` (one per page), or from `marketingConsentText` if the page ever sends it (up to 300 characters). Opt-ins from before 9 October 2026 have no words saved, and the list says so.
   - **If you change a tick box's wording on the website, change `MARKETING_CONSENT_TEXT` too.** The morning check reads both pages and tells you if they differ.
   - Unsubscribes: when someone replies STOP, open any of their jobs in the admin app and tap "They asked to stop: unsubscribe them". That sets `Unsubscribed on` for every booking with their email. Ticking the box on a later booking counts as fresh consent.
-  - Before sending any marketing, run `refreshMarketingList` from the function dropdown. It rebuilds the "Marketing list" tab: one row per email that opted in and hasn't unsubscribed since, with the words they agreed to and when. Send only to that list, and every marketing email must say how to unsubscribe (for now, "reply STOP"). A one-click unsubscribe link would need a small page on the website; it isn't built yet.
+  - Before sending any marketing, run `refreshMarketingList` from the function dropdown. It rebuilds the "Marketing list" tab: one row per email that opted in and hasn't unsubscribed since, with the words they agreed to, when, and their own unsubscribe link. Send only to that list, and every marketing email must include that person's link (FRE-219). Anything Code.gs sends as marketing uses `marketingFooter_`, which adds the link and "reply STOP", and refuses if there's no email to make a link for.
+  - Using the link sets `Unsubscribed on` for every booking with their email, the same as the admin app button, and emails you a one-line note. Apps Script can't add the List-Unsubscribe email header, so the link in the email is the way to do it.
 
 ## Can't work a day (FRE-223)
 
@@ -117,10 +122,15 @@ All of this is in `Code.gs` and `Dashboard.html`. The website doesn't read any o
 - `node _tests/customers-and-contacts.test.js` checks jobs dragged in the calendar, repeat customers, the site contact email and link, and marketing consent, unsubscribes and the marketing list (FRE-203, FRE-195). It needs no setup.
 - `node _tests/backup-and-reviews.test.js` checks the daily backup, what it bins and never bins, the morning check's backup line, and the Google-then-Trustpilot review links (FRE-220, FRE-217). It needs no setup.
 - `node _tests/day-off.test.js` checks the "I can't work today" button: which jobs it picks, the emails, the block, reminders held back, rebooking online without using a move, and the morning check (FRE-223). It needs no setup.
+- `node _tests/unsubscribe.test.js` checks the unsubscribe links, the `unsubscribe` call, re-opting in, and that the token can't do anything else (FRE-219). It needs no setup.
 - `node _tests/dashboard.test.js` drives `Dashboard.html` in a browser against the same fake, so the page and `Code.gs` are checked together. It needs the Playwright setup from `booking.test.js`.
 - These fakes aren't Google. A change to anything that touches Drive, the calendar, Sheets or PDF layout still needs a real try after deploying.
 
 ## Last updated
+
+12 October 2026:
+
+- One-click unsubscribe links for marketing emails: `POST { action: "unsubscribe", u }`, an `Unsubscribe token` column, the link on the Marketing list tab, and `marketingFooter_` for any marketing email (FRE-219). `Code.gs` only. Nothing to run. The website page (`unsubscribe.html`) is separate.
 
 9 October 2026 (night):
 
